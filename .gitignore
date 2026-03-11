@@ -1,0 +1,62 @@
+# Clojure / Leiningen
+/target
+/classes
+/checkouts
+pom.xml
+pom.xml.asc
+*.jar
+*.class
+/.lein-*
+/.lein-repl-history
+/.lein-failures
+/np
+
+# Clojure CLI / tools.deps
+/.cpcache
+/.clj-kondo/.cache
+/.calva
+/.nrepl-port
+.nrepl-port
+nrepl.edn
+
+# REPL history
+.rebel_readline_history
+.repl_history
+
+# Datomic
+/datomic-data
+/storage
+*.dtm
+
+# Kafka / Zookeeper (local dev)
+/kafka-logs
+/zookeeper-data
+/zookeeper-logs
+
+# Docker
+docker-compose.override.yml
+
+# Environment / secrets
+.env
+.env.*
+config/local.edn
+resources/local.edn
+config/secrets.edn
+
+# Editor / IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Java
+hs_err_pid*
+replay_pid*
+
+# Logs
+*.log
+/logs

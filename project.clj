@@ -16,6 +16,12 @@
                  ;; Kafka
                  [org.apache.kafka/kafka-clients    "3.9.0"]
 
+                 ;; Redis Cache
+                 [com.taoensso/carmine              "3.4.1"]
+
+                 ;; Dependency Injection
+                 [com.stuartsierra/component        "1.1.0"]
+
                  ;; Schema validation
                  [prismatic/schema                  "1.4.1"]
 
@@ -32,8 +38,22 @@
   :main url-shortener.core
   :aot  [url-shortener.core]
 
-  :profiles {:dev  {:dependencies [[org.clojure/test.check "1.1.1"]]
+  :profiles {:dev  {:dependencies [[org.clojure/test.check "1.1.1"]
+                                   [io.pedestal/pedestal.service-tools "0.7.2"]]
                     :source-paths ["dev"]}
-             :test {:dependencies [[org.clojure/test.check "1.1.1"]]}}
+             :test {:dependencies [[org.clojure/test.check "1.1.1"]
+                                   [io.pedestal/pedestal.service-tools "0.7.2"]]}}
 
-  :aliases {"migrate" ["run" "-m" "url-shortener.diplomat.datomic.migrate"]})
+  :plugins [[lein-cloverage "1.2.4"]
+            [lein-ancient "0.7.0"]]
+
+  :aliases {"migrate" ["run" "-m" "url-shortener.diplomat.datomic.migrate"]
+            "test-unit" ["test" ":only" 
+                         "url-shortener.logic.shortener-test"
+                         "url-shortener.adapters.url-test"
+                         "url-shortener.controllers.url-test"
+                         "url-shortener.diplomat.datomic-test"]
+            "test-integration" ["test" ":only"
+                                "url-shortener.integration.api-test"]
+            "test-all" ["test"]
+            "coverage" ["cloverage" "--ns-exclude-regex" "url-shortener.core"]})

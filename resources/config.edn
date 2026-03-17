@@ -1,0 +1,19 @@
+{:datomic-uri #profile {:dev "datomic:mem://url-shortener"
+                        :test "datomic:mem://url-shortener-test"
+                        :prod #env DATOMIC_URI}
+ 
+ :redis-host #profile {:dev "localhost"
+                       :test "localhost"
+                       :prod #env REDIS_HOST}
+ 
+ :redis-port #profile {:dev 6379
+                       :test 6379
+                       :prod #env REDIS_PORT}
+ 
+ :kafka-bootstrap-servers #profile {:dev "localhost:9092"
+                                    :test "localhost:9092"
+                                    :prod #env KAFKA_BOOTSTRAP_SERVERS}
+ 
+ :port #profile {:dev 8080
+                 :test 8081
+                 :prod #env PORT}}

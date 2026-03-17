@@ -38,15 +38,26 @@ A production-grade URL shortener written in Clojure, following the Diplomat Arch
 
 ## Architecture
 
-Follows the **Diplomat Architecture** (Hexagonal Architecture variant), strictly separating domain logic from infrastructure.
+Follows the **Diplomat Architecture** (Hexagonal Architecture variant), strictly separating domain logic from infrastructure. Each layer has a single responsibility and well-defined access rules.
 
 ![Diplomat Architecture](./assets/diplomat-architecture.png)
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full specification.
+- **Models** - Pure domain entities (`Url`, `UrlStats`, `ClickEvent`) defined with strict Prismatic Schemas. No dependencies on any other layer.
+- **Logic** - Pure business rules without side effects: Base62 encoding, URL validation, expiration calculation, click counting and statistics aggregation.
+- **Controllers** - Use case orchestration following the logic sandwich pattern: consume data from diplomats, compute with pure logic, produce side effects through diplomats.
+- **Adapters** - Pure transformation functions between wire schemas and domain models. Inbound adapters convert loose external data into strict internal models; outbound adapters do the reverse.
+- **Wire** - External data contracts. `wire.in` uses loose schemas (tolerant reader), while `wire.out`, `wire.cache` and `wire.datomic` use strict schemas (conservative writer).
+- **Diplomats** - All external communication: HTTP server (Pedestal), database (Datomic), cache (Redis) and event streaming (Kafka). Each diplomat is fault-tolerant and manages its own Component lifecycle.
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full specification with layer access rules.
+
+---
 
 ### Project Structure
 
 ![Project Structure](./assets/project-structure.png)
+
+---
 
 ### Data Flow
 
@@ -54,54 +65,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full specification.
 
 ---
 
-## Prerequisites
-
-- **Java** 11+
-- **Leiningen** 2.9+
-- **Docker & Docker Compose** (for Redis and Kafka in local development)
-
----
-
-## Getting Started
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/Ryanditko/clj-url-shortener.git
-cd clj-url-shortener
-```
-
-### 2. Install dependencies
-
-```bash
-lein deps
-```
-
-### 3. Start infrastructure services
-
-```bash
-docker-compose up -d
-```
-
-This starts Redis (port 6379), Zookeeper (port 2181), and Kafka (port 9092).
-
-### 4. Run the application
-
-```bash
-lein run
-```
-
-The API starts on `http://localhost:8080`.
-
-### 5. Run database migrations
-
-```bash
-lein migrate
-```
-
----
-
-## API Endpoints
+## API
 
 | Method   | Endpoint                  | Description              |
 |----------|---------------------------|--------------------------|
@@ -111,115 +75,22 @@ lein migrate
 | `GET`    | `/api/urls/:code/stats`   | Get click statistics     |
 | `DELETE` | `/api/urls/:code`         | Deactivate a short URL   |
 
-### Create a short URL
-
-```bash
-curl -X POST http://localhost:8080/api/urls \
-  -H "Content-Type: application/json" \
-  -d '{"original-url": "https://example.com/very/long/url", "owner": "user@example.com"}'
-```
-
-**Response** (201):
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "original-url": "https://example.com/very/long/url",
-  "short-code": "A1b2C3d4",
-  "short-url": "http://localhost:8080/r/A1b2C3d4",
-  "clicks": 0,
-  "owner": "user@example.com",
-  "created-at": "2026-03-17T15:30:00.000Z"
-}
-```
-
-### Redirect
-
-```bash
-curl -L http://localhost:8080/r/A1b2C3d4
-```
-
-### Get statistics
-
-```bash
-curl http://localhost:8080/api/urls/A1b2C3d4/stats
-```
-
-**Response** (200):
-```json
-{
-  "short-code": "A1b2C3d4",
-  "original-url": "https://example.com/very/long/url",
-  "total-clicks": 42,
-  "last-clicked-at": "2026-03-17T16:00:00.000Z",
-  "created-at": "2026-03-17T15:30:00.000Z",
-  "active": true
-}
-```
-
-### Deactivate
-
-```bash
-curl -X DELETE http://localhost:8080/api/urls/A1b2C3d4
-```
-
----
-
-## Testing
-
-All tests run self-contained with in-memory Datomic and NoOp mocks for Redis and Kafka.
-
-```bash
-# Run all tests
-lein test
-
-# Unit tests only (fast)
-lein test-unit
-
-# Integration tests only
-lein test-integration
-
-# Coverage report
-lein coverage
-```
-
-| Category | Tests | Assertions |
-|----------|-------|------------|
-| Logic | 13 | 65 |
-| Adapters | 10 | 49 |
-| Controllers | 3 | 17 |
-| Datomic | 7 | 19 |
-| Integration | 6 | 32 |
-| **Total** | **39** | **182** |
-
-See [TESTING.md](./TESTING.md) for the full testing guide.
-
----
-
-## Configuration
-
-Application configuration lives in `resources/config.edn` and supports environment-specific profiles:
-
-| Key | Description | Default |
-|-----|-------------|---------|
-| `:datomic-uri` | Datomic connection URI | `datomic:mem://url-shortener` |
-| `:redis-host` | Redis host | `localhost` |
-| `:redis-port` | Redis port | `6379` |
-| `:kafka-bootstrap-servers` | Kafka broker address | `localhost:9092` |
-| `:http-port` | HTTP server port | `8080` |
-
 ---
 
 ## Fault Tolerance
 
 The service is designed to gracefully degrade when external dependencies are unavailable:
 
-- **Redis unavailable**: Cache operations are skipped, all reads fall through to Datomic. A warning is logged.
-- **Kafka unavailable**: Events are silently dropped. URL operations continue normally. A warning is logged.
-- **Datomic**: Required for core operations. The service will not start without a valid Datomic connection.
+- **Redis unavailable** - Cache operations are skipped, all reads fall through to Datomic.
+- **Kafka unavailable** - Events are silently dropped. URL operations continue normally.
+- **Datomic** - Required for core operations. The service will not start without a valid connection.
 
 ---
 
 ## Documentation
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - Diplomat Architecture specification and layer rules.
-- [TESTING.md](./TESTING.md) - Testing guide, patterns and statistics.
+| Document | Description |
+|----------|-------------|
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Diplomat Architecture specification and layer access rules |
+| [TESTING.md](./TESTING.md) | Testing guide, patterns and statistics (39 tests, 182 assertions) |
+| [SETUP.md](./SETUP.md) | Prerequisites, getting started, API usage and configuration |

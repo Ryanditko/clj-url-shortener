@@ -1,6 +1,6 @@
 # Clojure URL Shortener
 
-![Paper URL Shortener](https://i.imgur.com/ifyjyTh.jpeg)
+![System Overview](./assets/system-overview.png)
 
 <div align="center">
 
@@ -40,44 +40,17 @@ A production-grade URL shortener written in Clojure, following the Diplomat Arch
 
 Follows the **Diplomat Architecture** (Hexagonal Architecture variant), strictly separating domain logic from infrastructure.
 
-![Architecture Diagram](https://i.imgur.com/8nf5PzT.jpeg)
+![Diplomat Architecture](./assets/diplomat-architecture.png)
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full specification.
 
 ### Project Structure
 
-```
-src/url_shortener/
-├── models/url.clj                    # Domain models (Url, UrlStats, ClickEvent)
-├── logic/shortener.clj               # Pure business logic (Base62, validation, stats)
-├── controllers/url.clj               # Use case orchestration (logic sandwich)
-├── adapters/url.clj                  # Data transformations (wire <-> model)
-├── wire/
-│   ├── in/create_url_request.clj     # Inbound schemas (loose)
-│   ├── out/url_response.clj          # Outbound API schemas (strict)
-│   ├── out/kafka_event.clj           # Kafka event schemas (strict)
-│   ├── cache/url_cache.clj           # Redis cache schemas (strict)
-│   └── datomic/url.clj              # Datomic persistence schemas (strict)
-├── diplomat/
-│   ├── http_server.clj               # Pedestal routes and handlers
-│   ├── datomic.clj                   # Datomic operations + Component lifecycle
-│   ├── datomic/schema.clj            # Datomic attribute definitions
-│   ├── datomic/migrate.clj           # Schema migration entry point
-│   ├── cache.clj                     # Redis caching (fault-tolerant)
-│   └── producer.clj                  # Kafka event publishing (fault-tolerant)
-├── system.clj                        # Component system map (DI)
-└── core.clj                          # Application entry point
-```
+![Project Structure](./assets/project-structure.png)
 
 ### Data Flow
 
-```
-HTTP Request → wire.in → adapters → model → logic → controllers → adapters → wire.out → HTTP Response
-                                                         ↓
-                                                   diplomat.datomic (persist)
-                                                   diplomat.cache (cache)
-                                                   diplomat.producer (publish event)
-```
+![Data Flow](./assets/data-flow.png)
 
 ---
 

@@ -2,19 +2,7 @@
 
 ## Test Structure
 
-```
-test/url_shortener/
-├── logic/
-│   └── shortener_test.clj          # Unit tests for business logic
-├── adapters/
-│   └── url_test.clj                # Unit tests for data transformations
-├── controllers/
-│   └── url_test.clj                # Unit tests for use case orchestration
-├── diplomat/
-│   └── datomic_test.clj            # Integration tests for Datomic
-└── integration/
-    └── api_test.clj                # End-to-end API integration tests
-```
+![Test Architecture](./assets/test-architecture.png)
 
 ## Test Categories
 

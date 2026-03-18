@@ -39,6 +39,11 @@
                                        {:topic (.topic record)
                                         :key (.key record)})
                                 (let [p (promise)] (deliver p nil) p))
+                              (send [_ record _callback]
+                                (swap! published conj
+                                       {:topic (.topic record)
+                                        :key (.key record)})
+                                (let [p (promise)] (deliver p nil) p))
                               (close [_]))
         prod (producer/map->Producer {:config {} :producer mock-kafka-producer})]
 

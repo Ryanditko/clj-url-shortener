@@ -99,16 +99,17 @@
 
     (let [redirect-response (adapters/model->redirect-response url (java.util.Date.))]
       (when (= 302 (:status redirect-response))
-        (let [updated-url (logic/increment-clicks url)
-              click-event {:event-id (java.util.UUID/randomUUID)
+        (let [click-event {:event-id (java.util.UUID/randomUUID)
                            :short-code short-code
                            :timestamp (java.util.Date.)}]
-          (diplomat.datomic/update-url! datomic (adapters/model->datomic updated-url))
-          (diplomat.datomic/save-click-event! datomic (adapters/click-event->datomic click-event))
-          (diplomat.cache/set-url! cache (adapters/model->cache updated-url) 3600)
-          (diplomat.producer/publish-url-accessed!
-           producer
-           (adapters/click-event->kafka-event click-event (:original-url url)))))
+          (future
+            (try
+              (diplomat.datomic/save-click-event! datomic (adapters/click-event->datomic click-event))
+              (diplomat.producer/publish-url-accessed!
+               producer
+               (adapters/click-event->kafka-event click-event (:original-url url)))
+              (catch Exception e
+                (log/warn "Async click tracking failed" {:error (.getMessage e)}))))))
 
       redirect-response)))
 

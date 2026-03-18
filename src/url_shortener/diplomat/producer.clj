@@ -47,7 +47,11 @@
       (let [key (:event-id event)
             value (json/write-str event)
             record (ProducerRecord. topic key value)]
-        @(.send kafka-producer record))
+        (.send kafka-producer record
+               (reify org.apache.kafka.clients.producer.Callback
+                 (onCompletion [_ _metadata exception]
+                   (when exception
+                     (log/warn "Kafka publish failed" {:topic topic :error (.getMessage exception)}))))))
       (catch Exception e
         (log/warn "Failed to publish event, skipping" {:topic topic :error (.getMessage e)})))))
 

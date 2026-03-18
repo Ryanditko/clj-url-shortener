@@ -2,6 +2,7 @@
   (:require [schema.core :as s]
             [datomic.api :as d]
             [com.stuartsierra.component :as component]
+            [url-shortener.diplomat.datomic.schema :as schema]
             [url-shortener.wire.datomic.url :as wire.datomic]
             [clojure.tools.logging :as log]))
 
@@ -15,7 +16,9 @@
         (log/info "Starting Datomic connection" {:uri uri})
         (d/create-database uri)
         (let [connection (d/connect uri)]
-          (log/info "Datomic connection established")
+          (log/info "Datomic connection established, running schema migration")
+          (schema/migrate! connection)
+          (log/info "Schema migration completed")
           (assoc this :conn connection)))))
   
   (stop [this]

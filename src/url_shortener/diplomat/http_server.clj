@@ -12,11 +12,12 @@
             [url-shortener.diplomat.cache :as diplomat.cache]
             [url-shortener.diplomat.producer :as diplomat.producer]))
 
-(defn- inject-components [components]
+(defn- inject-components [components config]
   (interceptor/interceptor
    {:name ::inject-components
     :enter (fn [context]
-             (assoc-in context [:request :components] components))}))
+             (assoc-in context [:request :components]
+                       (assoc components :base-url (:base-url config "http://localhost:8080/r"))))}))
 
 (defn- error-interceptor []
   (interceptor/interceptor
@@ -51,6 +52,17 @@
                (log/error exception "Request error")
                (assoc context :response response)))}))
 
+(def ^:private max-collision-retries 3)
+
+(defn- try-save-url! [datomic url-datomic]
+  (try
+    (diplomat.datomic/save-url! datomic url-datomic)
+    true
+    (catch Exception e
+      (if (some-> (ex-data e) :db/error (= :db.error/unique-conflict))
+        false
+        (throw e)))))
+
 (defn create-url-handler [request]
   (let [{:keys [json-params components]} request
         {:keys [datomic cache producer]} components
@@ -72,24 +84,35 @@
                        :field :custom-code})))
 
     (let [id (java.util.UUID/randomUUID)
-          timestamp (System/currentTimeMillis)
-          short-code (or custom-code
-                         (logic/generate-short-code-from-timestamp timestamp 8))
-          created-at (java.util.Date.)
-
-          url (adapters/wire-request->model
-               {:original-url original-url :owner owner :expires-at expires-at}
-               {:id id :short-code short-code :created-at created-at})
-
-          url-datomic (adapters/model->datomic url)]
-
-      (diplomat.datomic/save-url! datomic url-datomic)
-      (diplomat.cache/set-url! cache (adapters/model->cache url) 3600)
-      (diplomat.producer/publish-url-created! producer (adapters/model->url-created-event url))
-
-      {:status 201
-       :headers {"Content-Type" "application/json"}
-       :body (json/write-str (adapters/model->wire-response url "https://sho.rt"))})))
+          created-at (java.util.Date.)]
+      (if custom-code
+        (let [url (adapters/wire-request->model
+                   {:original-url original-url :owner owner :expires-at expires-at}
+                   {:id id :short-code custom-code :created-at created-at})
+              url-datomic (adapters/model->datomic url)]
+          (try-save-url! datomic url-datomic)
+          (diplomat.cache/set-url! cache (adapters/model->cache url) 3600)
+          (diplomat.producer/publish-url-created! producer (adapters/model->url-created-event url))
+          {:status 201
+           :headers {"Content-Type" "application/json"}
+           :body (json/write-str (adapters/model->wire-response url (:base-url components)))})
+        (loop [attempt 0
+               short-code (logic/generate-short-code-from-timestamp (System/currentTimeMillis) 8)]
+          (let [url (adapters/wire-request->model
+                     {:original-url original-url :owner owner :expires-at expires-at}
+                     {:id id :short-code short-code :created-at created-at})
+                url-datomic (adapters/model->datomic url)]
+            (if (try-save-url! datomic url-datomic)
+              (do
+                (diplomat.cache/set-url! cache (adapters/model->cache url) 3600)
+                (diplomat.producer/publish-url-created! producer (adapters/model->url-created-event url))
+                {:status 201
+                 :headers {"Content-Type" "application/json"}
+                 :body (json/write-str (adapters/model->wire-response url (:base-url components)))})
+              (if (< attempt max-collision-retries)
+                (recur (inc attempt) (logic/generate-alternative-code short-code))
+                (throw (ex-info "Failed to generate unique short code"
+                                {:type :validation-error :attempts (inc attempt)}))))))))))
 
 (defn redirect-url-handler [request]
   (let [{:keys [path-params components]} request
@@ -110,16 +133,17 @@
 
     (let [redirect-response (adapters/model->redirect-response url (java.util.Date.))]
       (when (= 302 (:status redirect-response))
-        (let [updated-url (logic/increment-clicks url)
-              click-event {:event-id (java.util.UUID/randomUUID)
+        (let [click-event {:event-id (java.util.UUID/randomUUID)
                            :short-code short-code
                            :timestamp (java.util.Date.)}]
-          (diplomat.datomic/update-url! datomic (adapters/model->datomic updated-url))
-          (diplomat.datomic/save-click-event! datomic (adapters/click-event->datomic click-event))
-          (diplomat.cache/set-url! cache (adapters/model->cache updated-url) 3600)
-          (diplomat.producer/publish-url-accessed!
-           producer
-           (adapters/click-event->kafka-event click-event (:original-url url)))))
+          (future
+            (try
+              (diplomat.datomic/save-click-event! datomic (adapters/click-event->datomic click-event))
+              (diplomat.producer/publish-url-accessed!
+               producer
+               (adapters/click-event->kafka-event click-event (:original-url url)))
+              (catch Exception e
+                (log/warn "Async click tracking failed" {:error (.getMessage e)}))))))
 
       redirect-response)))
 
@@ -189,7 +213,7 @@
   (-> (base-service-map config)
       http/default-interceptors
       (update ::http/interceptors
-              #(into [(error-interceptor) (inject-components components)] %))))
+              #(into [(error-interceptor) (inject-components components config)] %))))
 
 (defrecord HttpServer [config datomic cache producer server]
   component/Lifecycle

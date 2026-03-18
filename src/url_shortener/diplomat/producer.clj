@@ -1,7 +1,5 @@
 (ns url-shortener.diplomat.producer
-  (:require [schema.core :as s]
-            [com.stuartsierra.component :as component]
-            [url-shortener.wire.out.kafka-event :as wire.kafka]
+  (:require [com.stuartsierra.component :as component]
             [clojure.tools.logging :as log]
             [clojure.data.json :as json])
   (:import [org.apache.kafka.clients.producer KafkaProducer ProducerRecord ProducerConfig]

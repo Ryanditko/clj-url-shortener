@@ -19,8 +19,3 @@
    :created-at                       s/Str
    (s/optional-key :last-accessed)   s/Str
    (s/optional-key :unique-visitors) s/Int})
-
-(s/defschema RedirectResponse
-  {:status                           (s/enum 302 404 410)
-   :headers                          {s/Str s/Str}
-   (s/optional-key :body)            s/Str})

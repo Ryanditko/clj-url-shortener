@@ -50,24 +50,6 @@
       owner (assoc :owner owner)
       (some? active?) (assoc :active? active?))))
 
-(s/defn model->redirect-response :- wire.out/RedirectResponse
-  [url :- models/Url
-   current-time :- s/Inst]
-  (cond
-    (false? (:active? url))
-    {:status 410
-     :headers {"Content-Type" "text/plain"}
-     :body "This shortened URL has been deactivated"}
-    
-    (and (:expires-at url) (.after current-time (:expires-at url)))
-    {:status 410
-     :headers {"Content-Type" "text/plain"}
-     :body "This shortened URL has expired"}
-    
-    :else
-    {:status 302
-     :headers {"Location" (:original-url url)}}))
-
 (s/defn stats->wire-response :- wire.out/UrlStatsResponse
   [stats :- models/UrlStats
    original-url :- s/Str]

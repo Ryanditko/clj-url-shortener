@@ -1,8 +1,6 @@
 (ns url-shortener.diplomat.cache
-  (:require [schema.core :as s]
-            [taoensso.carmine :as car]
+  (:require [taoensso.carmine :as car]
             [com.stuartsierra.component :as component]
-            [url-shortener.wire.cache.url-cache :as wire.cache]
             [clojure.tools.logging :as log]
             [clojure.data.json :as json]))
 

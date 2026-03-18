@@ -27,7 +27,7 @@ lein deps
 docker-compose up -d
 ```
 
-This starts Redis (port 6379), Zookeeper (port 2181), and Kafka (port 9092).
+This starts Redis (port 6379) and Kafka in KRaft mode (port 9092).
 
 ### 4. Run database migrations
 
@@ -106,7 +106,7 @@ Application configuration lives in `resources/config.edn` and supports environme
 | `:redis-host` | Redis host | `localhost` |
 | `:redis-port` | Redis port | `6379` |
 | `:kafka-bootstrap-servers` | Kafka broker address | `localhost:9092` |
-| `:http-port` | HTTP server port | `8080` |
+| `:port` | HTTP server port | `8080` |
 
 ## Running Tests
 

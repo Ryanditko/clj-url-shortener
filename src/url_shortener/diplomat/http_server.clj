@@ -24,7 +24,9 @@
   (reify controllers/ICache
     (cache-url! [_ cached-url ttl] (diplomat.cache/set-url! cache cached-url ttl))
     (get-cached-url [_ code] (diplomat.cache/get-url cache code))
-    (invalidate-url! [_ code] (diplomat.cache/delete-url! cache code))))
+    (invalidate-url! [_ code] (diplomat.cache/delete-url! cache code))
+    (cache-stats! [_ stats ttl] (diplomat.cache/set-stats! cache stats ttl))
+    (get-cached-stats [_ code] (diplomat.cache/get-stats cache code))))
 
 (defn- ->producer-adapter [producer]
   (reify controllers/IProducer
@@ -78,10 +80,10 @@
 
 (defn create-url-handler [request]
   (let [{:keys [json-params components]} request
-        {:keys [original-url owner expires-at]} json-params
+        {:keys [original-url owner expires-at custom-code]} json-params
         {:keys [datomic cache producer]} components
         url (controllers/create-url! original-url
-                                     {:owner owner :expires-at expires-at}
+                                     {:owner owner :expires-at expires-at :custom-code custom-code}
                                      datomic cache producer)]
     {:status 201
      :headers {"Content-Type" "application/json"}
@@ -106,11 +108,14 @@
 (defn get-stats-handler [request]
   (let [{:keys [path-params components]} request
         short-code (:code path-params)
-        {:keys [datomic]} components
-        {:keys [stats original-url]} (controllers/get-url-stats short-code datomic)]
+        {:keys [datomic cache]} components
+        {:keys [stats original-url cached?]} (controllers/get-url-stats short-code datomic cache)
+        response (if cached?
+                   stats
+                   (adapters/stats->wire-response stats original-url))]
     {:status 200
      :headers {"Content-Type" "application/json"}
-     :body (json/write-str (adapters/stats->wire-response stats original-url))}))
+     :body (json/write-str response)}))
 
 (defn deactivate-url-handler [request]
   (let [{:keys [path-params components]} request

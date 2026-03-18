@@ -52,7 +52,9 @@
                          "url-shortener.logic.shortener-test"
                          "url-shortener.adapters.url-test"
                          "url-shortener.controllers.url-test"
-                         "url-shortener.diplomat.datomic-test"]
+                         "url-shortener.diplomat.datomic-test"
+                         "url-shortener.diplomat.cache-test"
+                         "url-shortener.diplomat.producer-test"]
             "test-integration" ["test" ":only"
                                 "url-shortener.integration.api-test"]
             "test-all" ["test"]

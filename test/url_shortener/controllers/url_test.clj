@@ -31,7 +31,9 @@
   controllers/ICache
   (cache-url! [_ _cached-url _ttl] nil)
   (get-cached-url [_ _short-code] nil)
-  (invalidate-url! [_ _short-code] nil))
+  (invalidate-url! [_ _short-code] nil)
+  (cache-stats! [_ _stats _ttl] nil)
+  (get-cached-stats [_ _short-code] nil))
 
 (defrecord MockProducer []
   controllers/IProducer
@@ -108,7 +110,45 @@
                  "https://example.com/expires"
                  {:expires-at "2024-12-31T23:59:59Z"}
                  datomic cache producer)]
-        (is (inst? (:expires-at url)))))))
+        (is (inst? (:expires-at url)))))
+
+    (testing "supports custom short code"
+      (let [url (controllers/create-url!
+                 "https://example.com/custom"
+                 {:custom-code "MyCode123"}
+                 datomic cache producer)]
+        (is (= "MyCode123" (:short-code url)))))
+
+    (testing "rejects invalid custom code format"
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Invalid custom code format"
+           (controllers/create-url!
+            "https://example.com/bad-custom"
+            {:custom-code "ab"}
+            datomic cache producer))))
+
+    (testing "rejects reserved custom codes"
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Invalid custom code format"
+           (controllers/create-url!
+            "https://example.com/reserved"
+            {:custom-code "admin"}
+            datomic cache producer))))
+
+    (testing "rejects duplicate custom code"
+      (controllers/create-url!
+       "https://example.com/first"
+       {:custom-code "UniqueCode"}
+       datomic cache producer)
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Custom code already in use"
+           (controllers/create-url!
+            "https://example.com/second"
+            {:custom-code "UniqueCode"}
+            datomic cache producer))))))
 
 (deftest redirect-url!-test
   (let [datomic (->MockDatomic)
@@ -177,7 +217,7 @@
             _ (controllers/track-click! (:short-code created-url) {} (:original-url created-url) datomic producer)
             {:keys [stats original-url]} (controllers/get-url-stats
                                            (:short-code created-url)
-                                           datomic)]
+                                           datomic cache)]
         (is (= "https://example.com/stats" original-url))
         (is (= (:short-code created-url) (:short-code stats)))
         (is (= 1 (:total-clicks stats)))))
@@ -186,7 +226,7 @@
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
            #"Short code not found"
-           (controllers/get-url-stats "nonexistent" datomic))))))
+           (controllers/get-url-stats "nonexistent" datomic cache))))))
 
 (deftest deactivate-url!-test
   (let [datomic (->MockDatomic)

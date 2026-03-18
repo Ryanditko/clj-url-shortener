@@ -92,8 +92,21 @@
     (is (false? (shortener/valid-custom-code? "api")))
     (is (false? (shortener/valid-custom-code? "admin")))
     (is (false? (shortener/valid-custom-code? "stats")))
+    (is (false? (shortener/valid-custom-code? "health")))
+    (is (false? (shortener/valid-custom-code? "metrics")))
     (is (false? (shortener/valid-custom-code? "API")))
-    (is (false? (shortener/valid-custom-code? "Admin")))))
+    (is (false? (shortener/valid-custom-code? "Admin")))
+    (is (false? (shortener/valid-custom-code? "HEALTH")))
+    (is (false? (shortener/valid-custom-code? "Metrics"))))
+
+  (testing "accepts maximum length code"
+    (is (true? (shortener/valid-custom-code? "abcdef123456"))))
+
+  (testing "rejects code exceeding max length"
+    (is (false? (shortener/valid-custom-code? "abcdef1234567"))))
+
+  (testing "handles nil input"
+    (is (false? (shortener/valid-custom-code? nil)))))
 
 (deftest url-expired?-test
   (let [now (java.util.Date.)
@@ -143,7 +156,22 @@
     
     (testing "finds last accessed timestamp"
       (let [stats (shortener/calculate-stats url click-events)]
-        (is (inst? (:last-accessed stats)))))))
+        (is (inst? (:last-accessed stats))))))
+
+  (testing "handles empty click events"
+    (let [url {:short-code "empty" :created-at (java.util.Date.)}
+          stats (shortener/calculate-stats url [])]
+      (is (= 0 (:total-clicks stats)))
+      (is (nil? (:last-accessed stats)))
+      (is (= 0 (:unique-visitors stats)))))
+
+  (testing "handles nil ip-address in click events"
+    (let [url {:short-code "nilip" :created-at (java.util.Date.)}
+          events [{:timestamp (java.util.Date.) :ip-address nil}
+                  {:timestamp (java.util.Date.) :ip-address "1.2.3.4"}]
+          stats (shortener/calculate-stats url events)]
+      (is (= 2 (:total-clicks stats)))
+      (is (= 1 (:unique-visitors stats))))))
 
 (deftest codes-collide?-test
   (testing "detects collisions"

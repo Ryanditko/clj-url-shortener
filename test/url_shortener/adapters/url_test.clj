@@ -129,6 +129,64 @@
       (is (= "https://example.com" (:original-url event)))
       (is (= "Mozilla/5.0" (:user-agent event))))))
 
+(deftest stats->wire-response-test
+  (testing "converts stats to wire response"
+    (let [stats {:short-code "abc123"
+                 :total-clicks 5
+                 :created-at #inst "2024-01-15T10:30:00.000-00:00"
+                 :last-accessed #inst "2024-03-01T14:00:00.000-00:00"
+                 :unique-visitors 3}
+          response (adapters/stats->wire-response stats "https://example.com")]
+      (is (= "abc123" (:short-code response)))
+      (is (= "https://example.com" (:original-url response)))
+      (is (= 5 (:total-clicks response)))
+      (is (string? (:created-at response)))
+      (is (string? (:last-accessed response)))
+      (is (= 3 (:unique-visitors response)))))
+
+  (testing "omits last-accessed when nil"
+    (let [stats {:short-code "abc123"
+                 :total-clicks 0
+                 :created-at #inst "2024-01-15T10:30:00.000-00:00"
+                 :last-accessed nil
+                 :unique-visitors 0}
+          response (adapters/stats->wire-response stats "https://example.com")]
+      (is (nil? (:last-accessed response))))))
+
+(deftest deactivation->kafka-event-test
+  (testing "creates deactivation event"
+    (let [event (adapters/deactivation->kafka-event "abc123" "user-requested")]
+      (is (= "url.deactivated" (:event-type event)))
+      (is (= "abc123" (:short-code event)))
+      (is (= "user-requested" (:reason event)))
+      (is (string? (:event-id event)))
+      (is (string? (:timestamp event))))))
+
+(deftest click-event->datomic-test
+  (testing "converts click event to datomic format"
+    (let [click-event {:event-id #uuid "987e6543-e21b-45d3-a987-123456789abc"
+                       :short-code "abc123"
+                       :timestamp #inst "2024-01-15T15:45:00.000-00:00"
+                       :user-agent "Mozilla/5.0"
+                       :ip-address "192.168.1.1"
+                       :referer "https://google.com"}
+          datomic (adapters/click-event->datomic click-event)]
+      (is (= #uuid "987e6543-e21b-45d3-a987-123456789abc" (:click/id datomic)))
+      (is (= "abc123" (:click/short-code datomic)))
+      (is (inst? (:click/timestamp datomic)))
+      (is (= "Mozilla/5.0" (:click/user-agent datomic)))
+      (is (= "192.168.1.1" (:click/ip-address datomic)))
+      (is (= "https://google.com" (:click/referer datomic)))))
+
+  (testing "omits nil optional fields"
+    (let [click-event {:event-id #uuid "987e6543-e21b-45d3-a987-123456789abc"
+                       :short-code "abc123"
+                       :timestamp #inst "2024-01-15T15:45:00.000-00:00"}
+          datomic (adapters/click-event->datomic click-event)]
+      (is (not (contains? datomic :click/user-agent)))
+      (is (not (contains? datomic :click/ip-address)))
+      (is (not (contains? datomic :click/referer))))))
+
 (deftest roundtrip-conversions-test
   (testing "model -> datomic -> model is stable"
     (let [datomic (adapters/model->datomic sample-url-model)

@@ -29,13 +29,7 @@ docker-compose up -d
 
 This starts Redis (port 6379) and Kafka in KRaft mode (port 9092).
 
-### 4. Run database migrations
-
-```bash
-lein migrate
-```
-
-### 5. Run the application
+### 4. Run the application
 
 ```bash
 lein run
@@ -84,9 +78,9 @@ curl http://localhost:8080/api/urls/A1b2C3d4/stats
   "short-code": "A1b2C3d4",
   "original-url": "https://example.com/very/long/url",
   "total-clicks": 42,
-  "last-clicked-at": "2026-03-17T16:00:00.000Z",
   "created-at": "2026-03-17T15:30:00.000Z",
-  "active": true
+  "last-accessed": "2026-03-17T16:00:00.000Z",
+  "unique-visitors": 15
 }
 ```
 
@@ -107,6 +101,7 @@ Application configuration lives in `resources/config.edn` and supports environme
 | `:redis-port` | Redis port | `6379` |
 | `:kafka-bootstrap-servers` | Kafka broker address | `localhost:9092` |
 | `:port` | HTTP server port | `8080` |
+| `:base-url` | Base URL for generated short links | `http://localhost:8080/r` |
 
 ## Running Tests
 

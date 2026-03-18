@@ -27,7 +27,7 @@ lein deps
 docker-compose up -d
 ```
 
-This starts Redis (port 6379), Zookeeper (port 2181), and Kafka (port 9092).
+This starts Redis (port 6379) and Kafka in KRaft mode (port 9092).
 
 ### 4. Run database migrations
 
@@ -40,7 +40,6 @@ lein migrate
 ```bash
 lein run
 ```
-
 The API starts on `http://localhost:8080`.
 
 ## API Usage

@@ -51,6 +51,17 @@
                (log/error exception "Request error")
                (assoc context :response response)))}))
 
+(def ^:private max-collision-retries 3)
+
+(defn- try-save-url! [datomic url-datomic]
+  (try
+    (diplomat.datomic/save-url! datomic url-datomic)
+    true
+    (catch Exception e
+      (if (some-> (ex-data e) :db/error (= :db.error/unique-conflict))
+        false
+        (throw e)))))
+
 (defn create-url-handler [request]
   (let [{:keys [json-params components]} request
         {:keys [datomic cache producer]} components
@@ -62,23 +73,26 @@
                        :field :original-url})))
 
     (let [id (java.util.UUID/randomUUID)
-          timestamp (System/currentTimeMillis)
-          short-code (logic/generate-short-code-from-timestamp timestamp 8)
-          created-at (java.util.Date.)
+          created-at (java.util.Date.)]
+      (loop [attempt 0
+             short-code (logic/generate-short-code-from-timestamp (System/currentTimeMillis) 8)]
+        (let [url (adapters/wire-request->model
+                   {:original-url original-url :owner owner :expires-at expires-at}
+                   {:id id :short-code short-code :created-at created-at})
+              url-datomic (adapters/model->datomic url)]
 
-          url (adapters/wire-request->model
-               {:original-url original-url :owner owner :expires-at expires-at}
-               {:id id :short-code short-code :created-at created-at})
+          (if (try-save-url! datomic url-datomic)
+            (do
+              (diplomat.cache/set-url! cache (adapters/model->cache url) 3600)
+              (diplomat.producer/publish-url-created! producer (adapters/model->url-created-event url))
+              {:status 201
+               :headers {"Content-Type" "application/json"}
+               :body (json/write-str (adapters/model->wire-response url "https://sho.rt"))})
 
-          url-datomic (adapters/model->datomic url)]
-
-      (diplomat.datomic/save-url! datomic url-datomic)
-      (diplomat.cache/set-url! cache (adapters/model->cache url) 3600)
-      (diplomat.producer/publish-url-created! producer (adapters/model->url-created-event url))
-
-      {:status 201
-       :headers {"Content-Type" "application/json"}
-       :body (json/write-str (adapters/model->wire-response url "https://sho.rt"))})))
+            (if (< attempt max-collision-retries)
+              (recur (inc attempt) (logic/generate-alternative-code short-code))
+              (throw (ex-info "Failed to generate unique short code"
+                              {:type :validation-error :attempts (inc attempt)})))))))))
 
 (defn redirect-url-handler [request]
   (let [{:keys [path-params components]} request

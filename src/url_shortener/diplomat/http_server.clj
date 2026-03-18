@@ -116,24 +116,32 @@
   (let [{:keys [path-params components]} request
         {:keys [datomic cache]} components
         short-code (:code path-params)
-        url-datomic (diplomat.datomic/find-url-by-short-code datomic short-code)]
+        cached-stats (diplomat.cache/get-stats cache short-code)]
 
-    (when-not url-datomic
-      (throw (ex-info "Short code not found"
-                      {:type :not-found :short-code short-code})))
-
-    (let [url (adapters/datomic->model url-datomic)
-          click-events-datomic (diplomat.datomic/find-click-events-by-short-code datomic short-code)
-          click-events (map #(hash-map :event-id (:click/id %)
-                                       :short-code (:click/short-code %)
-                                       :timestamp (:click/timestamp %))
-                            click-events-datomic)
-          stats (logic/calculate-stats url click-events)
-          response (adapters/stats->wire-response stats (:original-url url))]
-
+    (if cached-stats
       {:status 200
        :headers {"Content-Type" "application/json"}
-       :body (json/write-str response)})))
+       :body (json/write-str cached-stats)}
+
+      (let [url-datomic (diplomat.datomic/find-url-by-short-code datomic short-code)]
+        (when-not url-datomic
+          (throw (ex-info "Short code not found"
+                          {:type :not-found :short-code short-code})))
+
+        (let [url (adapters/datomic->model url-datomic)
+              click-events-datomic (diplomat.datomic/find-click-events-by-short-code datomic short-code)
+              click-events (map #(hash-map :event-id (:click/id %)
+                                           :short-code (:click/short-code %)
+                                           :timestamp (:click/timestamp %))
+                                click-events-datomic)
+              stats (logic/calculate-stats url click-events)
+              response (adapters/stats->wire-response stats (:original-url url))]
+
+          (diplomat.cache/set-stats! cache response 300)
+
+          {:status 200
+           :headers {"Content-Type" "application/json"}
+           :body (json/write-str response)})))))
 
 (defn deactivate-url-handler [request]
   (let [{:keys [path-params components]} request

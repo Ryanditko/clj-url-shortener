@@ -93,7 +93,50 @@
                  {:expires-at "2024-12-31T23:59:59Z"}
                  datomic
                  producer)]
-        (is (inst? (:expires-at url)))))))
+        (is (inst? (:expires-at url)))))
+
+    (testing "supports custom short code"
+      (let [url (controllers/create-url!
+                 "https://example.com/custom"
+                 {:custom-code "MyCode123"}
+                 datomic
+                 producer)]
+        (is (= "MyCode123" (:short-code url)))))
+
+    (testing "rejects invalid custom code format"
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Invalid custom code format"
+           (controllers/create-url!
+            "https://example.com/bad-custom"
+            {:custom-code "ab"}
+            datomic
+            producer))))
+
+    (testing "rejects reserved custom codes"
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Invalid custom code format"
+           (controllers/create-url!
+            "https://example.com/reserved"
+            {:custom-code "admin"}
+            datomic
+            producer))))
+
+    (testing "rejects duplicate custom code"
+      (controllers/create-url!
+       "https://example.com/first"
+       {:custom-code "UniqueCode"}
+       datomic
+       producer)
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Custom code already in use"
+           (controllers/create-url!
+            "https://example.com/second"
+            {:custom-code "UniqueCode"}
+            datomic
+            producer))))))
 
 (deftest redirect-url!-test
   (let [datomic (->MockDatomic)

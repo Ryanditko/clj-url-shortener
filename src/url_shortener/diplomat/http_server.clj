@@ -66,34 +66,53 @@
 (defn create-url-handler [request]
   (let [{:keys [json-params components]} request
         {:keys [datomic cache producer]} components
-        {:keys [original-url owner expires-at]} json-params]
+        {:keys [original-url owner expires-at custom-code]} json-params]
 
     (when-not (logic/valid-url? original-url)
       (throw (ex-info "Invalid URL format"
                       {:type :validation-error
                        :field :original-url})))
 
+    (when (and custom-code (not (logic/valid-custom-code? custom-code)))
+      (throw (ex-info "Invalid custom code format"
+                      {:type :validation-error
+                       :field :custom-code})))
+
+    (when (and custom-code (diplomat.datomic/find-url-by-short-code datomic custom-code))
+      (throw (ex-info "Custom code already in use"
+                      {:type :validation-error
+                       :field :custom-code})))
+
     (let [id (java.util.UUID/randomUUID)
           created-at (java.util.Date.)]
-      (loop [attempt 0
-             short-code (logic/generate-short-code-from-timestamp (System/currentTimeMillis) 8)]
+      (if custom-code
         (let [url (adapters/wire-request->model
                    {:original-url original-url :owner owner :expires-at expires-at}
-                   {:id id :short-code short-code :created-at created-at})
+                   {:id id :short-code custom-code :created-at created-at})
               url-datomic (adapters/model->datomic url)]
-
-          (if (try-save-url! datomic url-datomic)
-            (do
-              (diplomat.cache/set-url! cache (adapters/model->cache url) 3600)
-              (diplomat.producer/publish-url-created! producer (adapters/model->url-created-event url))
-              {:status 201
-               :headers {"Content-Type" "application/json"}
-               :body (json/write-str (adapters/model->wire-response url (:base-url components)))})
-
-            (if (< attempt max-collision-retries)
-              (recur (inc attempt) (logic/generate-alternative-code short-code))
-              (throw (ex-info "Failed to generate unique short code"
-                              {:type :validation-error :attempts (inc attempt)})))))))))
+          (try-save-url! datomic url-datomic)
+          (diplomat.cache/set-url! cache (adapters/model->cache url) 3600)
+          (diplomat.producer/publish-url-created! producer (adapters/model->url-created-event url))
+          {:status 201
+           :headers {"Content-Type" "application/json"}
+           :body (json/write-str (adapters/model->wire-response url (:base-url components)))})
+        (loop [attempt 0
+               short-code (logic/generate-short-code-from-timestamp (System/currentTimeMillis) 8)]
+          (let [url (adapters/wire-request->model
+                     {:original-url original-url :owner owner :expires-at expires-at}
+                     {:id id :short-code short-code :created-at created-at})
+                url-datomic (adapters/model->datomic url)]
+            (if (try-save-url! datomic url-datomic)
+              (do
+                (diplomat.cache/set-url! cache (adapters/model->cache url) 3600)
+                (diplomat.producer/publish-url-created! producer (adapters/model->url-created-event url))
+                {:status 201
+                 :headers {"Content-Type" "application/json"}
+                 :body (json/write-str (adapters/model->wire-response url (:base-url components)))})
+              (if (< attempt max-collision-retries)
+                (recur (inc attempt) (logic/generate-alternative-code short-code))
+                (throw (ex-info "Failed to generate unique short code"
+                                {:type :validation-error :attempts (inc attempt)}))))))))))
 
 (defn redirect-url-handler [request]
   (let [{:keys [path-params components headers]} request

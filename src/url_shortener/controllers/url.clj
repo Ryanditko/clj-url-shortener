@@ -15,8 +15,9 @@
 
 (s/defn create-url! :- models.url/Url
   [original-url :- s/Str
-   {:keys [owner expires-at]} :- {(s/optional-key :owner) s/Str
-                                   (s/optional-key :expires-at) s/Str}
+   {:keys [owner expires-at custom-code]} :- {(s/optional-key :owner) s/Str
+                                               (s/optional-key :expires-at) s/Str
+                                               (s/optional-key :custom-code) s/Str}
    datomic :- IDatomic
    producer :- IProducer]
   (when-not (logic/valid-url? original-url)
@@ -24,10 +25,23 @@
                     {:type :validation-error
                      :field :original-url
                      :value original-url})))
+
+  (when (and custom-code (not (logic/valid-custom-code? custom-code)))
+    (throw (ex-info "Invalid custom code format"
+                    {:type :validation-error
+                     :field :custom-code
+                     :value custom-code})))
+
+  (when (and custom-code (find-url-by-short-code datomic custom-code))
+    (throw (ex-info "Custom code already in use"
+                    {:type :validation-error
+                     :field :custom-code
+                     :value custom-code})))
   
   (let [id (java.util.UUID/randomUUID)
         timestamp (System/currentTimeMillis)
-        short-code (logic/generate-short-code-from-timestamp timestamp 8)
+        short-code (or custom-code
+                       (logic/generate-short-code-from-timestamp timestamp 8))
         created-at (java.util.Date.)
         url (adapters.url/wire-request->model 
              {:original-url original-url

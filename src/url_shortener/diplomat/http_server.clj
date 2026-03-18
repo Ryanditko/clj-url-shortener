@@ -6,18 +6,44 @@
             [com.stuartsierra.component :as component]
             [clojure.tools.logging :as log]
             [clojure.data.json :as json]
+            [url-shortener.controllers.url :as controllers]
             [url-shortener.adapters.url :as adapters]
-            [url-shortener.logic.shortener :as logic]
             [url-shortener.diplomat.datomic :as diplomat.datomic]
             [url-shortener.diplomat.cache :as diplomat.cache]
             [url-shortener.diplomat.producer :as diplomat.producer]))
+
+(defn- ->datomic-adapter [datomic]
+  (reify controllers/IDatomic
+    (save-url! [_ url] (diplomat.datomic/save-url! datomic url))
+    (find-url-by-short-code [_ code] (diplomat.datomic/find-url-by-short-code datomic code))
+    (update-url! [_ url] (diplomat.datomic/update-url! datomic url))
+    (save-click-event! [_ event] (diplomat.datomic/save-click-event! datomic event))
+    (find-click-events-by-short-code [_ code] (diplomat.datomic/find-click-events-by-short-code datomic code))))
+
+(defn- ->cache-adapter [cache]
+  (reify controllers/ICache
+    (cache-url! [_ cached-url ttl] (diplomat.cache/set-url! cache cached-url ttl))
+    (get-cached-url [_ code] (diplomat.cache/get-url cache code))
+    (invalidate-url! [_ code] (diplomat.cache/delete-url! cache code))
+    (cache-stats! [_ stats ttl] (diplomat.cache/set-stats! cache stats ttl))
+    (get-cached-stats [_ code] (diplomat.cache/get-stats cache code))))
+
+(defn- ->producer-adapter [producer]
+  (reify controllers/IProducer
+    (publish-url-created! [_ event] (diplomat.producer/publish-url-created! producer event))
+    (publish-url-accessed! [_ event] (diplomat.producer/publish-url-accessed! producer event))
+    (publish-url-deactivated! [_ event] (diplomat.producer/publish-url-deactivated! producer event))))
 
 (defn- inject-components [components config]
   (interceptor/interceptor
    {:name ::inject-components
     :enter (fn [context]
-             (assoc-in context [:request :components]
-                       (assoc components :base-url (:base-url config "http://localhost:8080/r"))))}))
+             (let [{:keys [datomic cache producer]} components]
+               (assoc-in context [:request :components]
+                         {:datomic (->datomic-adapter datomic)
+                          :cache (->cache-adapter cache)
+                          :producer (->producer-adapter producer)
+                          :base-url (:base-url config "http://localhost:8080/r")})))}))
 
 (defn- error-interceptor []
   (interceptor/interceptor
@@ -52,154 +78,51 @@
                (log/error exception "Request error")
                (assoc context :response response)))}))
 
-(def ^:private max-collision-retries 3)
-
-(defn- try-save-url! [datomic url-datomic]
-  (try
-    (diplomat.datomic/save-url! datomic url-datomic)
-    true
-    (catch Exception e
-      (if (some-> (ex-data e) :db/error (= :db.error/unique-conflict))
-        false
-        (throw e)))))
-
 (defn create-url-handler [request]
   (let [{:keys [json-params components]} request
+        {:keys [original-url owner expires-at custom-code]} json-params
         {:keys [datomic cache producer]} components
-        {:keys [original-url owner expires-at custom-code]} json-params]
-
-    (when-not (logic/valid-url? original-url)
-      (throw (ex-info "Invalid URL format"
-                      {:type :validation-error
-                       :field :original-url})))
-
-    (when (and custom-code (not (logic/valid-custom-code? custom-code)))
-      (throw (ex-info "Invalid custom code format"
-                      {:type :validation-error
-                       :field :custom-code})))
-
-    (when (and custom-code (diplomat.datomic/find-url-by-short-code datomic custom-code))
-      (throw (ex-info "Custom code already in use"
-                      {:type :validation-error
-                       :field :custom-code})))
-
-    (let [id (java.util.UUID/randomUUID)
-          created-at (java.util.Date.)]
-      (if custom-code
-        (let [url (adapters/wire-request->model
-                   {:original-url original-url :owner owner :expires-at expires-at}
-                   {:id id :short-code custom-code :created-at created-at})
-              url-datomic (adapters/model->datomic url)]
-          (try-save-url! datomic url-datomic)
-          (diplomat.cache/set-url! cache (adapters/model->cache url) 3600)
-          (diplomat.producer/publish-url-created! producer (adapters/model->url-created-event url))
-          {:status 201
-           :headers {"Content-Type" "application/json"}
-           :body (json/write-str (adapters/model->wire-response url (:base-url components)))})
-        (loop [attempt 0
-               short-code (logic/generate-short-code-from-timestamp (System/currentTimeMillis) 8)]
-          (let [url (adapters/wire-request->model
-                     {:original-url original-url :owner owner :expires-at expires-at}
-                     {:id id :short-code short-code :created-at created-at})
-                url-datomic (adapters/model->datomic url)]
-            (if (try-save-url! datomic url-datomic)
-              (do
-                (diplomat.cache/set-url! cache (adapters/model->cache url) 3600)
-                (diplomat.producer/publish-url-created! producer (adapters/model->url-created-event url))
-                {:status 201
-                 :headers {"Content-Type" "application/json"}
-                 :body (json/write-str (adapters/model->wire-response url (:base-url components)))})
-              (if (< attempt max-collision-retries)
-                (recur (inc attempt) (logic/generate-alternative-code short-code))
-                (throw (ex-info "Failed to generate unique short code"
-                                {:type :validation-error :attempts (inc attempt)}))))))))))
+        url (controllers/create-url! original-url
+                                     {:owner owner :expires-at expires-at :custom-code custom-code}
+                                     datomic cache producer)]
+    {:status 201
+     :headers {"Content-Type" "application/json"}
+     :body (json/write-str (adapters/model->wire-response url (:base-url components)))}))
 
 (defn redirect-url-handler [request]
   (let [{:keys [path-params components headers]} request
-        {:keys [datomic cache producer]} components
         short-code (:code path-params)
-
-        cached (diplomat.cache/get-url cache short-code)
-        url-datomic (when-not cached
-                      (diplomat.datomic/find-url-by-short-code datomic short-code))
-        url (cond
-              cached (adapters/cache->model cached (java.util.UUID/randomUUID))
-              url-datomic (adapters/datomic->model url-datomic)
-              :else nil)]
-
-    (when-not url
-      (throw (ex-info "Short code not found"
-                      {:type :not-found :short-code short-code})))
-
-    (let [redirect-response (adapters/model->redirect-response url (java.util.Date.))]
-      (when (= 302 (:status redirect-response))
-        (let [click-event {:event-id (java.util.UUID/randomUUID)
-                           :short-code short-code
-                           :timestamp (java.util.Date.)
-                           :user-agent (get headers "user-agent")
-                           :ip-address (or (get headers "x-forwarded-for") (:remote-addr request))
-                           :referer (get headers "referer")}]
-          (future
-            (try
-              (diplomat.datomic/save-click-event! datomic (adapters/click-event->datomic click-event))
-              (diplomat.producer/publish-url-accessed!
-               producer
-               (adapters/click-event->kafka-event click-event (:original-url url)))
-              (catch Exception e
-                (log/warn "Async click tracking failed" {:error (.getMessage e)}))))))
-
-      redirect-response)))
+        metadata {:user-agent (get headers "user-agent")
+                  :ip-address (or (get headers "x-forwarded-for") (:remote-addr request))
+                  :referer (get headers "referer")}
+        {:keys [datomic cache producer]} components
+        url (controllers/redirect-url! short-code metadata datomic cache producer)]
+    (future
+      (try
+        (controllers/track-click! short-code metadata (:original-url url) datomic producer)
+        (catch Exception e
+          (log/warn "Async click tracking failed" {:error (.getMessage e)}))))
+    {:status 302
+     :headers {"Location" (:original-url url)}}))
 
 (defn get-stats-handler [request]
   (let [{:keys [path-params components]} request
-        {:keys [datomic cache]} components
         short-code (:code path-params)
-        cached-stats (diplomat.cache/get-stats cache short-code)]
-
-    (if cached-stats
-      {:status 200
-       :headers {"Content-Type" "application/json"}
-       :body (json/write-str cached-stats)}
-
-      (let [url-datomic (diplomat.datomic/find-url-by-short-code datomic short-code)]
-        (when-not url-datomic
-          (throw (ex-info "Short code not found"
-                          {:type :not-found :short-code short-code})))
-
-        (let [url (adapters/datomic->model url-datomic)
-              click-events-datomic (diplomat.datomic/find-click-events-by-short-code datomic short-code)
-              click-events (map #(hash-map :event-id (:click/id %)
-                                           :short-code (:click/short-code %)
-                                           :timestamp (:click/timestamp %))
-                                click-events-datomic)
-              stats (logic/calculate-stats url click-events)
-              response (adapters/stats->wire-response stats (:original-url url))]
-
-          (diplomat.cache/set-stats! cache response 300)
-
-          {:status 200
-           :headers {"Content-Type" "application/json"}
-           :body (json/write-str response)})))))
+        {:keys [datomic cache]} components
+        {:keys [stats original-url cached?]} (controllers/get-url-stats short-code datomic cache)
+        response (if cached?
+                   stats
+                   (adapters/stats->wire-response stats original-url))]
+    {:status 200
+     :headers {"Content-Type" "application/json"}
+     :body (json/write-str response)}))
 
 (defn deactivate-url-handler [request]
   (let [{:keys [path-params components]} request
-        {:keys [datomic cache producer]} components
         short-code (:code path-params)
-        url-datomic (diplomat.datomic/find-url-by-short-code datomic short-code)]
-
-    (when-not url-datomic
-      (throw (ex-info "Short code not found"
-                      {:type :not-found :short-code short-code})))
-
-    (let [url (adapters/datomic->model url-datomic)
-          deactivated (assoc url :active? false)]
-      (diplomat.datomic/update-url! datomic (adapters/model->datomic deactivated))
-      (diplomat.cache/delete-url! cache short-code)
-      (diplomat.producer/publish-url-deactivated!
-       producer
-       (adapters/deactivation->kafka-event short-code "user-requested"))
-
-      {:status 204 :body ""})))
+        {:keys [datomic cache producer]} components]
+    (controllers/deactivate-url! short-code datomic cache producer)
+    {:status 204 :body ""}))
 
 (defn health-handler [_]
   {:status 200

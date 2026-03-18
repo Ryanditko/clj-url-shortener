@@ -32,7 +32,7 @@
     (publish-url-accessed! [_ event] (diplomat.producer/publish-url-accessed! producer event))
     (publish-url-deactivated! [_ event] (diplomat.producer/publish-url-deactivated! producer event))))
 
-(defn- inject-components [components]
+(defn- inject-components [components config]
   (interceptor/interceptor
    {:name ::inject-components
     :enter (fn [context]
@@ -40,7 +40,8 @@
                (assoc-in context [:request :components]
                          {:datomic (->datomic-adapter datomic)
                           :cache (->cache-adapter cache)
-                          :producer (->producer-adapter producer)})))}))
+                          :producer (->producer-adapter producer)
+                          :base-url (:base-url config "http://localhost:8080/r")})))}))
 
 (defn- error-interceptor []
   (interceptor/interceptor
@@ -84,7 +85,7 @@
                                      datomic cache producer)]
     {:status 201
      :headers {"Content-Type" "application/json"}
-     :body (json/write-str (adapters/model->wire-response url "https://sho.rt"))}))
+     :body (json/write-str (adapters/model->wire-response url (:base-url components)))}))
 
 (defn redirect-url-handler [request]
   (let [{:keys [path-params components headers]} request
@@ -94,6 +95,11 @@
                   :referer (get headers "referer")}
         {:keys [datomic cache producer]} components
         url (controllers/redirect-url! short-code metadata datomic cache producer)]
+    (future
+      (try
+        (controllers/track-click! short-code metadata (:original-url url) datomic producer)
+        (catch Exception e
+          (log/warn "Async click tracking failed" {:error (.getMessage e)}))))
     {:status 302
      :headers {"Location" (:original-url url)}}))
 
@@ -136,7 +142,7 @@
   (-> (base-service-map config)
       http/default-interceptors
       (update ::http/interceptors
-              #(into [(error-interceptor) (inject-components components)] %))))
+              #(into [(error-interceptor) (inject-components components config)] %))))
 
 (defrecord HttpServer [config datomic cache producer server]
   component/Lifecycle

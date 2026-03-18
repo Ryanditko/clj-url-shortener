@@ -126,33 +126,6 @@
                             datomic cache producer)]
         (is (= (:original-url created-url) (:original-url redirected-url)))))
     
-    (testing "increments click counter"
-      (let [created-url (controllers/create-url! 
-                         "https://example.com/clicks"
-                         {}
-                         datomic cache producer)
-            _ (controllers/redirect-url! (:short-code created-url) {} datomic cache producer)
-            redirected-url (controllers/redirect-url! (:short-code created-url) {} datomic cache producer)]
-        (is (= 2 (:clicks redirected-url)))))
-    
-    (testing "publishes access event"
-      (let [created-url (controllers/create-url! 
-                         "https://example.com/event"
-                         {}
-                         datomic cache producer)
-            initial-events (count (:accessed-events @test-state))]
-        (controllers/redirect-url! (:short-code created-url) {} datomic cache producer)
-        (is (= (inc initial-events) (count (:accessed-events @test-state))))))
-
-    (testing "saves click event to datomic"
-      (let [initial-clicks (count (:click-events @test-state))
-            created-url (controllers/create-url!
-                         "https://example.com/click-track"
-                         {}
-                         datomic cache producer)]
-        (controllers/redirect-url! (:short-code created-url) {} datomic cache producer)
-        (is (= (inc initial-clicks) (count (:click-events @test-state))))))
-    
     (testing "throws on non-existent short code"
       (is (thrown-with-msg? 
            clojure.lang.ExceptionInfo
@@ -176,6 +149,20 @@
               {}
               datomic cache producer)))))))
 
+(deftest track-click!-test
+  (let [datomic (->MockDatomic)
+        producer (->MockProducer)]
+
+    (testing "saves click event to datomic"
+      (let [initial-clicks (count (:click-events @test-state))]
+        (controllers/track-click! "abc123" {} "https://example.com" datomic producer)
+        (is (= (inc initial-clicks) (count (:click-events @test-state))))))
+
+    (testing "publishes access event"
+      (let [initial-events (count (:accessed-events @test-state))]
+        (controllers/track-click! "abc123" {} "https://example.com" datomic producer)
+        (is (= (inc initial-events) (count (:accessed-events @test-state))))))))
+
 (deftest get-url-stats-test
   (let [datomic (->MockDatomic)
         cache (->MockCache)
@@ -187,6 +174,7 @@
                          {}
                          datomic cache producer)
             _ (controllers/redirect-url! (:short-code created-url) {} datomic cache producer)
+            _ (controllers/track-click! (:short-code created-url) {} (:original-url created-url) datomic producer)
             {:keys [stats original-url]} (controllers/get-url-stats
                                            (:short-code created-url)
                                            datomic)]
@@ -249,14 +237,14 @@
         cache (->MockCache)
         producer (->MockProducer)]
     
-    (testing "handles multiple clicks correctly"
+    (testing "handles multiple clicks correctly via click events"
       (let [created-url (controllers/create-url! 
                          "https://example.com/multiple-clicks"
                          {}
                          datomic cache producer)
             short-code (:short-code created-url)]
         (dotimes [_ 10]
-          (controllers/redirect-url! short-code {} datomic cache producer))
-        (let [final-url (controllers/find-url-by-short-code datomic short-code)
-              final-model (adapters.url/datomic->model final-url)]
-          (is (= 10 (:clicks final-model))))))))
+          (controllers/track-click! short-code {} (:original-url created-url) datomic producer))
+        (let [click-events (->> (:click-events @test-state)
+                                (filter #(= short-code (:click/short-code %))))]
+          (is (= 10 (count click-events))))))))

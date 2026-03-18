@@ -2,7 +2,8 @@
   (:require [schema.core :as s]
             [url-shortener.models.url :as models.url]
             [url-shortener.logic.shortener :as logic]
-            [url-shortener.adapters.url :as adapters.url]))
+            [url-shortener.adapters.url :as adapters.url]
+            [clojure.tools.logging :as log]))
 
 (defprotocol IDatomic
   (save-url! [this url-datomic])
@@ -21,6 +22,17 @@
   (publish-url-accessed! [this event])
   (publish-url-deactivated! [this event]))
 
+(def ^:private max-collision-retries 3)
+
+(defn- try-save-url! [datomic url-datomic]
+  (try
+    (save-url! datomic url-datomic)
+    true
+    (catch Exception e
+      (if (some-> (ex-data e) :db/error (= :db.error/unique-conflict))
+        false
+        (throw e)))))
+
 (s/defn create-url! :- models.url/Url
   [original-url :- s/Str
    {:keys [owner expires-at]} :- {(s/optional-key :owner) s/Str
@@ -35,31 +47,29 @@
                      :value original-url})))
 
   (let [id (java.util.UUID/randomUUID)
-        timestamp (System/currentTimeMillis)
-        short-code (logic/generate-short-code-from-timestamp timestamp 8)
-        created-at (java.util.Date.)
-        url (adapters.url/wire-request->model
-             {:original-url original-url
-              :owner owner
-              :expires-at expires-at}
-             {:id id
-              :short-code short-code
-              :created-at created-at})
-        url-datomic (adapters.url/model->datomic url)]
-
-    (save-url! datomic url-datomic)
-    (cache-url! cache (adapters.url/model->cache url) 3600)
-    (publish-url-created! producer (adapters.url/model->url-created-event url))
-    url))
+        created-at (java.util.Date.)]
+    (loop [attempt 0
+           short-code (logic/generate-short-code-from-timestamp (System/currentTimeMillis) 8)]
+      (let [url (adapters.url/wire-request->model
+                 {:original-url original-url :owner owner :expires-at expires-at}
+                 {:id id :short-code short-code :created-at created-at})
+            url-datomic (adapters.url/model->datomic url)]
+        (if (try-save-url! datomic url-datomic)
+          (do
+            (cache-url! cache (adapters.url/model->cache url) 3600)
+            (publish-url-created! producer (adapters.url/model->url-created-event url))
+            url)
+          (if (< attempt max-collision-retries)
+            (recur (inc attempt) (logic/generate-alternative-code short-code))
+            (throw (ex-info "Failed to generate unique short code"
+                            {:type :validation-error :attempts (inc attempt)}))))))))
 
 (s/defn redirect-url! :- models.url/Url
   [short-code :- s/Str
-   request-metadata :- {(s/optional-key :user-agent) (s/maybe s/Str)
-                        (s/optional-key :ip-address) (s/maybe s/Str)
-                        (s/optional-key :referer) (s/maybe s/Str)}
+   _request-metadata
    datomic :- IDatomic
    cache :- ICache
-   producer :- IProducer]
+   _producer :- IProducer]
   (let [cached (get-cached-url cache short-code)
         url-datomic (when-not cached (find-url-by-short-code datomic short-code))
         url (cond
@@ -79,19 +89,19 @@
       (throw (ex-info "URL has expired"
                       {:type :expired-url :short-code short-code})))
 
-    (let [updated-url (logic/increment-clicks url)
-          click-event {:event-id (java.util.UUID/randomUUID)
-                       :short-code short-code
-                       :timestamp (java.util.Date.)
-                       :user-agent (:user-agent request-metadata)
-                       :ip-address (:ip-address request-metadata)
-                       :referer (:referer request-metadata)}]
-      (update-url! datomic (adapters.url/model->datomic updated-url))
-      (save-click-event! datomic (adapters.url/click-event->datomic click-event))
-      (cache-url! cache (adapters.url/model->cache updated-url) 3600)
-      (publish-url-accessed! producer
-                             (adapters.url/click-event->kafka-event click-event (:original-url url)))
-      updated-url)))
+    url))
+
+(defn track-click!
+  [short-code request-metadata original-url datomic producer]
+  (let [click-event {:event-id (java.util.UUID/randomUUID)
+                     :short-code short-code
+                     :timestamp (java.util.Date.)
+                     :user-agent (:user-agent request-metadata)
+                     :ip-address (:ip-address request-metadata)
+                     :referer (:referer request-metadata)}]
+    (save-click-event! datomic (adapters.url/click-event->datomic click-event))
+    (publish-url-accessed! producer
+                           (adapters.url/click-event->kafka-event click-event original-url))))
 
 (defn get-url-stats
   [short-code datomic]

@@ -215,12 +215,12 @@
                          datomic cache producer)
             _ (controllers/redirect-url! (:short-code created-url) {} datomic cache producer)
             _ (controllers/track-click! (:short-code created-url) {} (:original-url created-url) datomic producer)
-            {:keys [stats original-url]} (controllers/get-url-stats
-                                           (:short-code created-url)
-                                           datomic cache)]
-        (is (= "https://example.com/stats" original-url))
-        (is (= (:short-code created-url) (:short-code stats)))
-        (is (= 1 (:total-clicks stats)))))
+            response (controllers/get-url-stats
+                       (:short-code created-url)
+                       datomic cache)]
+        (is (= "https://example.com/stats" (:original-url response)))
+        (is (= (:short-code created-url) (:short-code response)))
+        (is (= 1 (:total-clicks response)))))
 
     (testing "throws on non-existent short code"
       (is (thrown-with-msg?

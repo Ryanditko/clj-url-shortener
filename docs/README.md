@@ -93,4 +93,4 @@ The service is designed to gracefully degrade when external dependencies are una
 |----------|-------------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Diplomat Architecture specification and layer access rules |
 | [TESTING.md](./TESTING.md) | Testing guide, patterns and statistics (39 tests, 182 assertions) |
-| [SETUP.md](./SETUP.md) | Prerequisites, getting started, API usage and configuration |
+| [SETUP.md](./SETUP.md) | Prerequisites, getting started, API usage and configuration           |

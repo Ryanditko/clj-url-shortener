@@ -54,16 +54,27 @@
 (defn create-url-handler [request]
   (let [{:keys [json-params components]} request
         {:keys [datomic cache producer]} components
-        {:keys [original-url owner expires-at]} json-params]
+        {:keys [original-url owner expires-at custom-code]} json-params]
 
     (when-not (logic/valid-url? original-url)
       (throw (ex-info "Invalid URL format"
                       {:type :validation-error
                        :field :original-url})))
 
+    (when (and custom-code (not (logic/valid-custom-code? custom-code)))
+      (throw (ex-info "Invalid custom code format"
+                      {:type :validation-error
+                       :field :custom-code})))
+
+    (when (and custom-code (diplomat.datomic/find-url-by-short-code datomic custom-code))
+      (throw (ex-info "Custom code already in use"
+                      {:type :validation-error
+                       :field :custom-code})))
+
     (let [id (java.util.UUID/randomUUID)
           timestamp (System/currentTimeMillis)
-          short-code (logic/generate-short-code-from-timestamp timestamp 8)
+          short-code (or custom-code
+                         (logic/generate-short-code-from-timestamp timestamp 8))
           created-at (java.util.Date.)
 
           url (adapters/wire-request->model

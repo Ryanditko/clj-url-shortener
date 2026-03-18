@@ -1,5 +1,7 @@
 # Clojure URL Shortener
 
+![System Overview](./assets/system-overview.png)
+
 <div align="center">
 
 ![Clojure](https://img.shields.io/badge/Clojure-91DC47?style=for-the-badge&logo=clojure&logoColor=5881D8)
@@ -16,35 +18,6 @@
 </div>
 
 A production-grade URL shortener written in Clojure, following the Diplomat Architecture pattern. Uses Datomic for immutable URL storage, Redis for high-performance caching, and Apache Kafka for real-time click event streaming and analytics aggregation. Includes JWT authentication, per-IP rate limiting, Prometheus metrics, paginated statistics, and a full CI/CD pipeline via GitHub Actions.
-
----
-
-## System Overview
-
-```mermaid
-graph TB
-    Client([Client]) -->|HTTP| LB[Load Balancer]
-    LB --> Pedestal[Pedestal HTTP Server]
-
-    subgraph interceptors [Interceptor Chain]
-        RateLimit[Rate Limiter]
-        Metrics[Metrics Collector]
-        Auth[JWT Auth]
-        ErrorHandler[Error Handler]
-    end
-
-    Pedestal --> interceptors
-    interceptors --> Handlers[Route Handlers]
-    Handlers --> Controllers[Controllers]
-    Controllers --> Logic[Logic - Pure Functions]
-    Controllers --> DatomicDB[(Datomic)]
-    Controllers --> RedisCache[(Redis Cache)]
-    Controllers --> KafkaProducer[Kafka Producer]
-    KafkaProducer --> KafkaBroker[Kafka Broker]
-    KafkaBroker --> KafkaConsumer[Kafka Consumer]
-    KafkaConsumer -->|analytics aggregation| DatomicDB
-    Pedestal -->|"/metrics"| Prometheus[Prometheus Scraper]
-```
 
 ---
 

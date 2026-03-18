@@ -12,11 +12,12 @@
             [url-shortener.diplomat.cache :as diplomat.cache]
             [url-shortener.diplomat.producer :as diplomat.producer]))
 
-(defn- inject-components [components]
+(defn- inject-components [components config]
   (interceptor/interceptor
    {:name ::inject-components
     :enter (fn [context]
-             (assoc-in context [:request :components] components))}))
+             (assoc-in context [:request :components]
+                       (assoc components :base-url (:base-url config "http://localhost:8080/r"))))}))
 
 (defn- error-interceptor []
   (interceptor/interceptor
@@ -87,7 +88,7 @@
               (diplomat.producer/publish-url-created! producer (adapters/model->url-created-event url))
               {:status 201
                :headers {"Content-Type" "application/json"}
-               :body (json/write-str (adapters/model->wire-response url "https://sho.rt"))})
+               :body (json/write-str (adapters/model->wire-response url (:base-url components)))})
 
             (if (< attempt max-collision-retries)
               (recur (inc attempt) (logic/generate-alternative-code short-code))
@@ -193,7 +194,7 @@
   (-> (base-service-map config)
       http/default-interceptors
       (update ::http/interceptors
-              #(into [(error-interceptor) (inject-components components)] %))))
+              #(into [(error-interceptor) (inject-components components config)] %))))
 
 (defrecord HttpServer [config datomic cache producer server]
   component/Lifecycle

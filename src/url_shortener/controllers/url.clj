@@ -129,22 +129,23 @@
 
 (defn get-url-stats
   [short-code datomic cache]
-  (if-let [cached (get-cached-stats cache short-code)]
-    {:stats cached :original-url nil :cached? true}
-    (let [url-datomic (find-url-by-short-code datomic short-code)]
-      (when-not url-datomic
-        (throw (ex-info "Short code not found"
-                        {:type :not-found :short-code short-code})))
-      (let [url (adapters.url/datomic->model url-datomic)
-            click-events-datomic (find-click-events-by-short-code datomic short-code)
-            click-events (map (fn [ce]
-                                {:event-id (:click/id ce)
-                                 :short-code (:click/short-code ce)
-                                 :timestamp (:click/timestamp ce)
-                                 :ip-address (:click/ip-address ce)})
-                              click-events-datomic)
-            stats (logic/calculate-stats url click-events)]
-        {:stats stats :original-url (:original-url url) :cached? false}))))
+  (or (get-cached-stats cache short-code)
+      (let [url-datomic (find-url-by-short-code datomic short-code)]
+        (when-not url-datomic
+          (throw (ex-info "Short code not found"
+                          {:type :not-found :short-code short-code})))
+        (let [url (adapters.url/datomic->model url-datomic)
+              click-events-datomic (find-click-events-by-short-code datomic short-code)
+              click-events (map (fn [ce]
+                                  {:event-id (:click/id ce)
+                                   :short-code (:click/short-code ce)
+                                   :timestamp (:click/timestamp ce)
+                                   :ip-address (:click/ip-address ce)})
+                                click-events-datomic)
+              stats (logic/calculate-stats url click-events)
+              response (adapters.url/stats->wire-response stats (:original-url url))]
+          (cache-stats! cache response 300)
+          response))))
 
 (defn deactivate-url!
   [short-code datomic cache producer]

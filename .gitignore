@@ -13,7 +13,8 @@ pom.xml.asc
 
 # Clojure CLI / tools.deps
 /.cpcache
-/.clj-kondo/.cache
+/.clj-kondo/
+/.lsp/
 /.calva
 /.nrepl-port
 .nrepl-port

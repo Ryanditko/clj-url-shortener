@@ -4,10 +4,11 @@
             [url-shortener.diplomat.producer :as producer]))
 
 (deftest producer-component-lifecycle-test
-  (testing "start with unreachable broker sets producer to nil gracefully"
+  (testing "start creates producer instance even with unreachable broker"
     (let [config {:kafka-bootstrap-servers "localhost:19092"}
           started (component/start (producer/new-producer config))]
-      (is (nil? (:producer started)))))
+      (is (some? (:producer started)))
+      (component/stop started)))
 
   (testing "stop clears producer reference"
     (let [started (producer/map->Producer {:config {} :producer nil})

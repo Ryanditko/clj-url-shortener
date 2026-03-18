@@ -109,10 +109,7 @@
   (let [{:keys [path-params components]} request
         short-code (:code path-params)
         {:keys [datomic cache]} components
-        {:keys [stats original-url cached?]} (controllers/get-url-stats short-code datomic cache)
-        response (if cached?
-                   stats
-                   (adapters/stats->wire-response stats original-url))]
+        response (controllers/get-url-stats short-code datomic cache)]
     {:status 200
      :headers {"Content-Type" "application/json"}
      :body (json/write-str response)}))

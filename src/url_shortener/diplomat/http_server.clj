@@ -96,7 +96,7 @@
                               {:type :validation-error :attempts (inc attempt)})))))))))
 
 (defn redirect-url-handler [request]
-  (let [{:keys [path-params components]} request
+  (let [{:keys [path-params components headers]} request
         {:keys [datomic cache producer]} components
         short-code (:code path-params)
 
@@ -116,7 +116,10 @@
       (when (= 302 (:status redirect-response))
         (let [click-event {:event-id (java.util.UUID/randomUUID)
                            :short-code short-code
-                           :timestamp (java.util.Date.)}]
+                           :timestamp (java.util.Date.)
+                           :user-agent (get headers "user-agent")
+                           :ip-address (or (get headers "x-forwarded-for") (:remote-addr request))
+                           :referer (get headers "referer")}]
           (future
             (try
               (diplomat.datomic/save-click-event! datomic (adapters/click-event->datomic click-event))

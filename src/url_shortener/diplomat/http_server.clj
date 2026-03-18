@@ -81,7 +81,7 @@
        :body (json/write-str (adapters/model->wire-response url "https://sho.rt"))})))
 
 (defn redirect-url-handler [request]
-  (let [{:keys [path-params components]} request
+  (let [{:keys [path-params components headers]} request
         {:keys [datomic cache producer]} components
         short-code (:code path-params)
 
@@ -102,7 +102,10 @@
         (let [updated-url (logic/increment-clicks url)
               click-event {:event-id (java.util.UUID/randomUUID)
                            :short-code short-code
-                           :timestamp (java.util.Date.)}]
+                           :timestamp (java.util.Date.)
+                           :user-agent (get headers "user-agent")
+                           :ip-address (or (get headers "x-forwarded-for") (:remote-addr request))
+                           :referer (get headers "referer")}]
           (diplomat.datomic/update-url! datomic (adapters/model->datomic updated-url))
           (diplomat.datomic/save-click-event! datomic (adapters/click-event->datomic click-event))
           (diplomat.cache/set-url! cache (adapters/model->cache updated-url) 3600)

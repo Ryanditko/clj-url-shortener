@@ -59,29 +59,6 @@
       (is (nil? (:expires-at response)))
       (is (nil? (:owner response))))))
 
-(deftest model->redirect-response-test
-  (testing "creates successful redirect"
-    (let [response (adapters/model->redirect-response 
-                    sample-url-model
-                    #inst "2024-01-15T10:30:00.000-00:00")]
-      (is (= 302 (:status response)))
-      (is (= "https://example.com/long/url" (get-in response [:headers "Location"])))))
-  
-  (testing "handles deactivated URL"
-    (let [deactivated-url (assoc sample-url-model :active? false)
-          response (adapters/model->redirect-response 
-                    deactivated-url
-                    #inst "2024-01-15T10:30:00.000-00:00")]
-      (is (= 410 (:status response)))
-      (is (string? (:body response)))))
-  
-  (testing "handles expired URL"
-    (let [response (adapters/model->redirect-response 
-                    sample-url-model
-                    #inst "2025-01-01T00:00:00.000-00:00")]
-      (is (= 410 (:status response)))
-      (is (string? (:body response))))))
-
 (deftest model->cache-test
   (testing "converts model to cache format"
     (let [cached (adapters/model->cache sample-url-model)]

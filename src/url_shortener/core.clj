@@ -5,10 +5,11 @@
             [clojure.java.io :as io]
             [clojure.tools.logging :as log]))
 
-(defn load-config []
-  (aero/read-config (io/resource "config.edn")))
+(defn load-config
+  ([] (load-config (keyword (or (System/getenv "APP_PROFILE") "dev"))))
+  ([profile] (aero/read-config (io/resource "config.edn") {:profile profile})))
 
-(defn -main [& args]
+(defn -main [& _args]
   (let [config (load-config)]
     (log/info "Starting URL Shortener service")
     (let [system (system/start-system! config)]

@@ -17,6 +17,20 @@
 - Click counting
 - Statistics calculation
 
+**Auth Tests** (`logic/auth_test.clj`)
+- Password hashing and verification (bcrypt+SHA512)
+- JWT token generation and validation
+- Expired token rejection
+- Bearer token extraction from headers
+
+**Rate Limiter Tests** (`logic/rate_limiter_test.clj`)
+- Token bucket creation
+- Allows requests within limit
+- Blocks requests exceeding limit
+- Per-IP isolation
+- Per-route-group isolation
+- Token refill over time
+
 **Adapter Tests** (`adapters/url_test.clj`)
 - Wire request to model transformations
 - Model to wire response transformations
@@ -45,13 +59,43 @@
 - Time-travel queries
 - Transactional integrity
 
+**Cache Tests** (`diplomat/cache_test.clj`)
+- Cache component lifecycle
+- Graceful failure when Redis is unavailable
+
+**Producer Tests** (`diplomat/producer_test.clj`)
+- Producer component lifecycle
+- Graceful failure when Kafka is unavailable
+- Topic routing (url.created, url.accessed, url.deactivated)
+
+**Consumer Tests** (`diplomat/consumer_test.clj`)
+- Consumer component lifecycle (graceful start without Kafka)
+- Daily analytics creation for new short codes
+- Analytics upsert for same-day events
+- Multiple days producing separate analytics entries
+- Empty result for unknown short codes
+
 **API Tests** (`integration/api_test.clj`)
-- Health check endpoint
+- Health check endpoint (GET `/health`)
+- Metrics endpoint (GET `/metrics`)
+- User registration and login (POST `/api/auth/register`, POST `/api/auth/login`)
 - URL creation (POST `/api/urls`)
 - URL redirect (GET `/r/:code`)
 - URL statistics (GET `/api/urls/:code/stats`)
+- Daily analytics (GET `/api/urls/:code/analytics`)
 - URL deactivation (DELETE `/api/urls/:code`)
-- Complete lifecycle (create -> redirect -> stats -> deactivate -> 410 gone)
+- Complete lifecycle (create -> redirect -> stats -> analytics -> deactivate -> 410 gone)
+
+**Auth API Tests** (`integration/auth_api_test.clj`)
+- User registration (success, duplicate rejection, short password, empty credentials)
+- Login with valid credentials, wrong password, non-existent user, empty credentials
+- DELETE without auth returns 401
+- DELETE with valid JWT returns 204
+- Analytics without auth returns 401
+- Analytics with valid JWT returns 200
+- Expired token returns 401
+- Rate limiting returns 429 with Retry-After header
+- Full auth flow: register -> login -> use token for protected endpoint
 
 ## Running Tests
 
@@ -105,12 +149,18 @@ View report at `target/coverage/index.html`.
 
 | Category | Tests | Assertions |
 |----------|-------|------------|
-| Logic | 13 | 65 |
+| Logic (shortener) | 13 | 65 |
+| Logic (auth) | 4 | 10 |
+| Logic (rate limiter) | 2 | 10 |
 | Adapters | 10 | 49 |
 | Controllers | 3 | 17 |
-| Datomic | 7 | 19 |
-| Integration | 6 | 32 |
-| **Total** | **39** | **182** |
+| Diplomat (datomic) | 7 | 19 |
+| Diplomat (cache) | 2 | 4 |
+| Diplomat (producer) | 3 | 8 |
+| Diplomat (consumer) | 4 | 12 |
+| Integration (api) | 9 | 55 |
+| Integration (auth api) | 8 | 76 |
+| **Total** | **67** | **325** |
 
 ## Test Patterns
 
@@ -132,6 +182,7 @@ Integration tests use in-memory Datomic and NoOp records for Cache and Producer,
 (defrecord NoOpProducer [])
 
 (defn setup-system []
+  (d/delete-database test-uri)
   (d/create-database test-uri)
   (let [conn (d/connect test-uri)]
     (schema/migrate! conn)
@@ -139,9 +190,31 @@ Integration tests use in-memory Datomic and NoOp records for Cache and Producer,
           components {:datomic datomic
                       :cache (->NoOpCache)
                       :producer (->NoOpProducer)}
-          service-map (diplomat.http-server/build-service-map components {:port 0})
+          config {:port 0
+                  :jwt-secret test-jwt-secret
+                  :jwt-ttl-minutes 60}
+          service-map (diplomat.http-server/build-service-map components config)
           servlet (http/create-servlet service-map)]
       (reset! service-fn (::http/service-fn servlet)))))
+```
+
+### Auth Integration Test with Rate Limiting
+
+Auth-protected integration tests use `build-service-map-with-auth` to exercise JWT validation and rate limiting:
+
+```clojure
+(def test-config {:port 0
+                  :jwt-secret test-jwt-secret
+                  :jwt-ttl-minutes 60
+                  :rate-limiter {:api {:max-tokens 100 :refill-per-second 10.0}
+                                 :redirect {:max-tokens 100 :refill-per-second 10.0}
+                                 :auth {:max-tokens 100 :refill-per-second 10.0}}})
+
+(defn setup-system []
+  ;; ...
+  (let [service-map (diplomat.http-server/build-service-map-with-auth components test-config)
+        servlet (http/create-servlet service-map)]
+    (reset! service-fn (::http/service-fn servlet))))
 ```
 
 ## Test Data Fixtures

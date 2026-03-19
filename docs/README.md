@@ -13,11 +13,11 @@
 
 ![Status](https://img.shields.io/badge/Status-Active-91DC47?style=flat-square&logo=checkmarx&logoColor=white)
 ![License](https://img.shields.io/badge/License-Academic-820AD1?style=flat-square&logo=bookstack&logoColor=white)
-![Tests](https://img.shields.io/badge/Tests-56_passing-91DC47?style=flat-square&logo=testcafe&logoColor=white)
+![Tests](https://img.shields.io/badge/Tests-passing-91DC47?style=flat-square&logo=testcafe&logoColor=white)
 
 </div>
 
-A production-grade URL shortener written in Clojure, following the Diplomat Architecture pattern. Uses Datomic for immutable URL storage, Redis for high-performance caching, and Apache Kafka for real-time click event streaming and analytics aggregation. Includes JWT authentication, per-IP rate limiting, Prometheus metrics, paginated statistics, and a full CI/CD pipeline via GitHub Actions.
+A production-grade URL shortener written in Clojure, following the Diplomat Architecture pattern. Uses Datomic for immutable URL and user storage, Redis for high-performance caching, and Apache Kafka for real-time click event streaming and analytics aggregation. Includes JWT authentication with user registration, per-IP rate limiting, CORS support, Prometheus metrics, and a full CI/CD pipeline via GitHub Actions.
 
 ---
 
@@ -27,12 +27,12 @@ A production-grade URL shortener written in Clojure, following the Diplomat Arch
 | --- | --- | --- |
 | ![Clojure](https://img.shields.io/badge/-91DC47?style=flat-square&logo=clojure&logoColor=5881D8) | Language | Clojure |
 | ![Pedestal](https://img.shields.io/badge/-5881D8?style=flat-square&logo=clojure&logoColor=white) | HTTP Server / API Gateway | Pedestal + Ring |
-| ![Datomic](https://img.shields.io/badge/-FF3621?style=flat-square&logo=databricks&logoColor=white) | Database / URL Storage | Datomic |
+| ![Datomic](https://img.shields.io/badge/-FF3621?style=flat-square&logo=databricks&logoColor=white) | Database / URL & User Storage | Datomic |
 | ![Redis](https://img.shields.io/badge/-DC382D?style=flat-square&logo=redis&logoColor=white) | Caching | Redis |
 | ![Kafka](https://img.shields.io/badge/-231F20?style=flat-square&logo=apachekafka&logoColor=white) | Event Streaming | Apache Kafka |
 | ![Schema](https://img.shields.io/badge/-820AD1?style=flat-square&logo=clojure&logoColor=white) | Schema Validation | Plumatic Schema |
 | ![Prometheus](https://img.shields.io/badge/-E6522C?style=flat-square&logo=prometheus&logoColor=white) | Observability | Prometheus Metrics |
-| ![Docker](https://img.shields.io/badge/-2496ED?style=flat-square&logo=docker&logoColor=white) | Containerization | Docker Compose |
+| ![Docker](https://img.shields.io/badge/-2496ED?style=flat-square&logo=docker&logoColor=white) | Containerization | Docker + Docker Compose |
 | ![Testing](https://img.shields.io/badge/-1B1B1B?style=flat-square&logo=testcafe&logoColor=white) | Testing | clojure.test |
 | ![CI](https://img.shields.io/badge/-2088FF?style=flat-square&logo=githubactions&logoColor=white) | CI/CD | GitHub Actions |
 
@@ -73,7 +73,7 @@ graph LR
 ```
 
 - **Models** - Pure domain entities (`Url`, `UrlStats`, `ClickEvent`) defined with strict Prismatic Schemas. No dependencies on any other layer.
-- **Logic** - Pure business rules without side effects: Base62 encoding, URL validation, expiration calculation, click counting, statistics aggregation, JWT token management, and rate limiting.
+- **Logic** - Pure business rules without side effects: Base62 encoding, URL validation, expiration calculation, click counting, statistics aggregation, JWT token management, password hashing, and rate limiting.
 - **Controllers** - Use case orchestration following the logic sandwich pattern: consume data from diplomats, compute with pure logic, produce side effects through diplomats.
 - **Adapters** - Pure transformation functions between wire schemas and domain models. Inbound adapters convert loose external data into strict internal models; outbound adapters do the reverse.
 - **Wire** - External data contracts. `wire.in` uses loose schemas (tolerant reader), while `wire.out`, `wire.cache` and `wire.datomic` use strict schemas (conservative writer).
@@ -89,15 +89,25 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full specification with layer a
 sequenceDiagram
     participant C as Client
     participant P as Pedestal
+    participant RL as Rate Limiter
     participant Auth as JWT Auth
     participant Ctrl as Controller
     participant D as Datomic
     participant R as Redis
     participant K as Kafka
 
+    C->>P: POST /api/auth/register
+    P->>RL: Check rate limit
+    P->>D: Save user (hashed password)
+    P->>C: 201 Created
+
+    C->>P: POST /api/auth/login
+    P->>RL: Check rate limit
+    P->>D: Find user, verify password
+    P->>C: 200 {token, expires-in}
+
     C->>P: POST /api/urls (with Bearer token)
-    P->>Auth: Validate JWT
-    Auth->>P: Identity injected
+    P->>RL: Check rate limit
     P->>Ctrl: create-url!
     Ctrl->>D: save-url!
     Ctrl->>R: cache-url!
@@ -105,6 +115,7 @@ sequenceDiagram
     P->>C: 201 Created
 
     C->>P: GET /r/:code
+    P->>RL: Check rate limit
     P->>Ctrl: redirect-url!
     Ctrl->>R: get-cached-url
     R-->>Ctrl: cache hit / miss
@@ -122,10 +133,11 @@ sequenceDiagram
 |----------|--------------------------------|----------|--------------------------------|
 | `GET`    | `/health`                      | Public   | Health check                   |
 | `GET`    | `/metrics`                     | Public   | Prometheus metrics             |
+| `POST`   | `/api/auth/register`          | Public   | Register a new user            |
 | `POST`   | `/api/auth/login`             | Public   | Authenticate and get JWT token |
-| `POST`   | `/api/urls`                   | Required | Shorten a URL                  |
+| `POST`   | `/api/urls`                   | Public   | Shorten a URL                  |
 | `GET`    | `/r/:code`                     | Public   | Redirect to original URL       |
-| `GET`    | `/api/urls/:code/stats`       | Required | Get click statistics (paginated) |
+| `GET`    | `/api/urls/:code/stats`       | Public   | Get click statistics           |
 | `GET`    | `/api/urls/:code/analytics`   | Required | Get daily analytics breakdown  |
 | `DELETE` | `/api/urls/:code`             | Required | Deactivate a short URL         |
 
@@ -133,8 +145,10 @@ sequenceDiagram
 
 ## Security
 
-- **JWT Authentication** - Protected endpoints require a `Bearer` token obtained via `/api/auth/login`.
-- **Rate Limiting** - Per-IP token bucket: 30 req/min for API, 100 req/min for redirects, 5 req/min for login (brute force protection).
+- **User Registration** - Users register via `/api/auth/register` with username and password (min 8 chars). Passwords are hashed with bcrypt+SHA512 and stored in Datomic.
+- **JWT Authentication** - Protected endpoints require a `Bearer` token obtained via `/api/auth/login` with valid credentials.
+- **Rate Limiting** - Per-IP token bucket: 30 req/min for API, 100 req/min for redirects, 5 req/min for auth endpoints (brute force protection).
+- **CORS** - Cross-origin requests are supported with configurable origin headers.
 - **429 Too Many Requests** - Includes `Retry-After` header when rate limit is exceeded.
 
 ---
@@ -161,6 +175,32 @@ The service is designed to gracefully degrade when external dependencies are una
 
 ---
 
+## Docker
+
+### Run the full stack
+
+```bash
+docker-compose up -d
+```
+
+This starts Redis, Kafka (KRaft mode), and the application on port 8080.
+
+### Run only infrastructure (for local development)
+
+```bash
+docker-compose up -d redis kafka
+```
+
+Then run the app locally with `lein run`.
+
+### Build the image separately
+
+```bash
+docker build -t url-shortener .
+```
+
+---
+
 ## CI/CD
 
 GitHub Actions pipeline runs on every push and PR to `main`:
@@ -176,5 +216,5 @@ GitHub Actions pipeline runs on every push and PR to `main`:
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Diplomat Architecture specification and layer access rules |
-| [TESTING.md](./TESTING.md) | Testing guide, patterns and statistics (56 tests, 281 assertions) |
+| [TESTING.md](./TESTING.md) | Testing guide, patterns and statistics |
 | [SETUP.md](./SETUP.md) | Prerequisites, getting started, API usage and configuration |

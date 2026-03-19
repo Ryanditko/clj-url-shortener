@@ -78,7 +78,29 @@
     :db/cardinality :db.cardinality/one
     :db/doc "HTTP referer (optional)"}])
 
-(def schema (concat url-schema click-event-schema))
+(def analytics-schema
+  [{:db/ident :analytics/short-code
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/index true
+    :db/doc "Reference to URL short code for analytics"}
+
+   {:db/ident :analytics/date
+    :db/valueType :db.type/instant
+    :db/cardinality :db.cardinality/one
+    :db/doc "Day start timestamp for daily aggregation"}
+
+   {:db/ident :analytics/clicks
+    :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one
+    :db/doc "Click count for the day"}
+
+   {:db/ident :analytics/unique-visitors
+    :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one
+    :db/doc "Unique visitor count for the day"}])
+
+(def schema (concat url-schema click-event-schema analytics-schema))
 
 (defn migrate! [conn]
   @(d/transact conn schema))

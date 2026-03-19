@@ -116,3 +116,28 @@
                    (assoc analytics :db/id entity-id)
                    (assoc analytics :db/id (d/tempid :db.part/user)))]]
     @(d/transact conn tx-data)))
+
+(s/defn find-all-daily-analytics [datomic :- Datomic
+                                   short-code :- s/Str]
+  (let [db (d/db (:conn datomic))
+        results (d/q '[:find (pull ?e [*])
+                       :in $ ?short-code
+                       :where [?e :analytics/short-code ?short-code]]
+                     db
+                     short-code)]
+    (->> (map first results)
+         (sort-by :analytics/date))))
+
+(defn save-user! [datomic user]
+  (let [conn (:conn datomic)
+        tx-data [(assoc user :db/id (str "user-" (:user/id user)))]]
+    @(d/transact conn tx-data)))
+
+(defn find-user-by-username [datomic username]
+  (let [db (d/db (:conn datomic))
+        result (d/q '[:find (pull ?e [:user/id :user/username :user/password-hash :user/created-at])
+                       :in $ ?username
+                       :where [?e :user/username ?username]]
+                     db
+                     username)]
+    (ffirst result)))

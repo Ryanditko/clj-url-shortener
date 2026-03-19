@@ -60,12 +60,16 @@
   :aliases {"migrate" ["run" "-m" "url-shortener.diplomat.datomic.migrate"]
             "test-unit" ["test" ":only" 
                          "url-shortener.logic.shortener-test"
+                         "url-shortener.logic.auth-test"
+                         "url-shortener.logic.rate-limiter-test"
                          "url-shortener.adapters.url-test"
                          "url-shortener.controllers.url-test"
                          "url-shortener.diplomat.datomic-test"
                          "url-shortener.diplomat.cache-test"
-                         "url-shortener.diplomat.producer-test"]
+                         "url-shortener.diplomat.producer-test"
+                         "url-shortener.diplomat.consumer-test"]
             "test-integration" ["test" ":only"
-                                "url-shortener.integration.api-test"]
+                                "url-shortener.integration.api-test"
+                                "url-shortener.integration.auth-api-test"]
             "test-all" ["test"]
             "coverage" ["cloverage" "--ns-exclude-regex" "url-shortener.core"]})

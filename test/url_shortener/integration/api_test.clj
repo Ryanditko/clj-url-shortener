@@ -18,6 +18,13 @@
 (defrecord NoOpCache [])
 (defrecord NoOpProducer [])
 
+(def test-config {:port 0
+                  :jwt-secret test-jwt-secret
+                  :jwt-ttl-minutes 60
+                  :rate-limiter {:api {:max-tokens 1000 :refill-per-second 100.0}
+                                 :redirect {:max-tokens 1000 :refill-per-second 100.0}
+                                 :auth {:max-tokens 1000 :refill-per-second 100.0}}})
+
 (defn setup-system []
   (d/delete-database test-uri)
   (d/create-database test-uri)
@@ -27,10 +34,7 @@
           cache (->NoOpCache)
           producer (->NoOpProducer)
           components {:datomic datomic :cache cache :producer producer}
-          config {:port 0
-                  :jwt-secret test-jwt-secret
-                  :jwt-ttl-minutes 60}
-          service-map (diplomat.http-server/build-service-map components config)
+          service-map (diplomat.http-server/build-service-map-with-auth components test-config)
           servlet (http/create-servlet service-map)]
       (reset! test-system {:datomic datomic :conn conn})
       (reset! service-fn (::http/service-fn servlet)))))
@@ -39,6 +43,17 @@
   (reset! test-system nil)
   (reset! service-fn nil)
   (d/delete-database test-uri))
+
+(defn- get-auth-token! []
+  (let [username (str "testuser-" (java.util.UUID/randomUUID))
+        password "testpassword123"
+        _ (test/response-for @service-fn :post "/api/auth/register"
+                             :headers {"Content-Type" "application/json"}
+                             :body (json/write-str {:username username :password password}))
+        resp (test/response-for @service-fn :post "/api/auth/login"
+                                :headers {"Content-Type" "application/json"}
+                                :body (json/write-str {:username username :password password}))]
+    (:token (json/read-str (:body resp) :key-fn keyword))))
 
 (use-fixtures :once
   (fn [f]
@@ -205,8 +220,9 @@
       (is (= 404 (:status response))))))
 
 (deftest deactivate-url-integration-test
-  (testing "deactivates a URL"
-    (let [create-body (json/write-str {:original-url "https://example.com/deactivate-test"})
+  (testing "deactivates a URL with valid auth"
+    (let [token (get-auth-token!)
+          create-body (json/write-str {:original-url "https://example.com/deactivate-test"})
           create-response (test/response-for 
                            @service-fn 
                            :post "/api/urls"
@@ -217,16 +233,31 @@
               short-code (:short-code created-url)
               deactivate-response (test/response-for 
                                    @service-fn 
-                                   :delete (str "/api/urls/" short-code))]
+                                   :delete (str "/api/urls/" short-code)
+                                   :headers {"Authorization" (str "Bearer " token)})]
           (is (= 204 (:status deactivate-response)))
           (let [redirect-response (test/response-for 
                                     @service-fn 
                                     :get (str "/r/" short-code))]
-            (is (= 410 (:status redirect-response)))))))))
+            (is (= 410 (:status redirect-response))))))))
+
+  (testing "DELETE without auth returns 401"
+    (let [create-body (json/write-str {:original-url "https://example.com/deactivate-noauth"})
+          create-response (test/response-for
+                           @service-fn
+                           :post "/api/urls"
+                           :headers {"Content-Type" "application/json"}
+                           :body create-body)]
+      (when (= 201 (:status create-response))
+        (let [created-url (json/read-str (:body create-response) :key-fn keyword)
+              short-code (:short-code created-url)
+              resp (test/response-for @service-fn :delete (str "/api/urls/" short-code))]
+          (is (= 401 (:status resp))))))))
 
 (deftest analytics-endpoint-test
-  (testing "returns analytics for a URL"
-    (let [create-body (json/write-str {:original-url "https://example.com/analytics-test"})
+  (testing "returns analytics for a URL with valid auth"
+    (let [token (get-auth-token!)
+          create-body (json/write-str {:original-url "https://example.com/analytics-test"})
           create-response (test/response-for
                            @service-fn
                            :post "/api/urls"
@@ -237,23 +268,24 @@
               short-code (:short-code created-url)
               analytics-response (test/response-for
                                   @service-fn
-                                  :get (str "/api/urls/" short-code "/analytics"))]
+                                  :get (str "/api/urls/" short-code "/analytics")
+                                  :headers {"Authorization" (str "Bearer " token)})]
           (is (= 200 (:status analytics-response)))
           (when (= 200 (:status analytics-response))
             (let [body (json/read-str (:body analytics-response) :key-fn keyword)]
               (is (= short-code (:short-code body)))
               (is (vector? (:daily-analytics body)))))))))
 
-  (testing "returns 404 for non-existent code"
+  (testing "analytics without auth returns 401"
     (let [response (test/response-for
                     @service-fn
-                    :get "/api/urls/nonexistent/analytics")]
-      (is (= 404 (:status response))))))
+                    :get "/api/urls/somecode/analytics")]
+      (is (= 401 (:status response))))))
 
 (deftest end-to-end-flow-test
   (testing "complete URL lifecycle"
-    (let [create-body (json/write-str {:original-url "https://example.com/e2e-test"
-                                        :owner "e2e@test.com"})
+    (let [token (get-auth-token!)
+          create-body (json/write-str {:original-url "https://example.com/e2e-test"})
           create-resp (test/response-for 
                        @service-fn 
                        :post "/api/urls"
@@ -273,12 +305,19 @@
             (is (= 200 (:status stats-resp)))
             (is (>= (:total-clicks stats) 1)))
 
-          (let [analytics-resp (test/response-for @service-fn :get (str "/api/urls/" code "/analytics"))
-                analytics (json/read-str (:body analytics-resp) :key-fn keyword)]
+          (let [analytics-resp (test/response-for
+                                @service-fn
+                                :get (str "/api/urls/" code "/analytics")
+                                :headers {"Authorization" (str "Bearer " token)})]
             (is (= 200 (:status analytics-resp)))
-            (is (= code (:short-code analytics))))
+            (when (= 200 (:status analytics-resp))
+              (let [analytics (json/read-str (:body analytics-resp) :key-fn keyword)]
+                (is (= code (:short-code analytics))))))
           
-          (let [deactivate-resp (test/response-for @service-fn :delete (str "/api/urls/" code))]
+          (let [deactivate-resp (test/response-for
+                                 @service-fn
+                                 :delete (str "/api/urls/" code)
+                                 :headers {"Authorization" (str "Bearer " token)})]
             (is (= 204 (:status deactivate-resp))))
           
           (let [redirect-resp (test/response-for @service-fn :get (str "/r/" code))]

@@ -30,6 +30,10 @@
                             :test 60
                             :prod 30}
 
+ :consumer-group-id #profile {:dev "url-shortener-analytics"
+                             :test "url-shortener-analytics-test"
+                             :prod #env KAFKA_CONSUMER_GROUP_ID}
+
  :rate-limiter {:api {:max-tokens 30 :refill-per-second 0.5}
                 :redirect {:max-tokens 100 :refill-per-second 1.67}
                 :auth {:max-tokens 5 :refill-per-second 0.083}}}

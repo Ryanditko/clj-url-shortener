@@ -25,6 +25,12 @@
                  ;; Schema validation
                  [prismatic/schema                  "1.4.1"]
 
+                 ;; Observability - Prometheus
+                 [io.prometheus/prometheus-metrics-core                "1.5.0"]
+                 [io.prometheus/prometheus-metrics-model               "1.5.0"]
+                 [io.prometheus/prometheus-metrics-instrumentation-jvm "1.5.0"]
+                 [io.prometheus/prometheus-metrics-exposition-formats  "1.5.0"]
+
                  ;; Utilities
                  [org.clojure/tools.logging         "1.3.0"]
                  [ch.qos.logback/logback-classic    "1.5.16"]

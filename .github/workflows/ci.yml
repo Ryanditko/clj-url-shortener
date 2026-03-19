@@ -19,7 +19,7 @@ jobs:
           version: '2024.08.01'
 
       - name: Run clj-kondo
-        run: clj-kondo --lint src test
+        run: clj-kondo --lint src test --fail-level error
 
   test:
     name: Test (Java ${{ matrix.java }})

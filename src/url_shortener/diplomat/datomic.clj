@@ -87,3 +87,32 @@
                      db
                      short-code)]
     (map first results)))
+
+(s/defn find-daily-analytics [datomic :- Datomic
+                               short-code :- s/Str
+                               date :- java.util.Date]
+  (let [db (d/db (:conn datomic))
+        results (d/q '[:find (pull ?e [*])
+                       :in $ ?short-code ?date
+                       :where [?e :analytics/short-code ?short-code]
+                              [?e :analytics/date ?date]]
+                     db
+                     short-code
+                     date)]
+    (map first results)))
+
+(defn save-daily-analytics! [datomic analytics]
+  (let [conn (:conn datomic)
+        db (d/db conn)
+        existing (d/q '[:find ?e
+                        :in $ ?sc ?d
+                        :where [?e :analytics/short-code ?sc]
+                               [?e :analytics/date ?d]]
+                      db
+                      (:analytics/short-code analytics)
+                      (:analytics/date analytics))
+        entity-id (ffirst existing)
+        tx-data [(if entity-id
+                   (assoc analytics :db/id entity-id)
+                   (assoc analytics :db/id (d/tempid :db.part/user)))]]
+    @(d/transact conn tx-data)))

@@ -13,11 +13,11 @@
 
 ![Status](https://img.shields.io/badge/Status-Active-91DC47?style=flat-square&logo=checkmarx&logoColor=white)
 ![License](https://img.shields.io/badge/License-Academic-820AD1?style=flat-square&logo=bookstack&logoColor=white)
-![Tests](https://img.shields.io/badge/Tests-56_passing-91DC47?style=flat-square&logo=testcafe&logoColor=white)
+![Tests](https://img.shields.io/badge/Tests-54_passing-91DC47?style=flat-square&logo=testcafe&logoColor=white)
 
 </div>
 
-A production-grade URL shortener written in Clojure, following the Diplomat Architecture pattern. Uses Datomic for immutable URL storage, Redis for high-performance caching, and Apache Kafka for real-time click event streaming and analytics aggregation. Includes JWT authentication, per-IP rate limiting, Prometheus metrics, paginated statistics, and a full CI/CD pipeline via GitHub Actions.
+A production-grade URL shortener written in Clojure, following the Diplomat Architecture pattern. Uses Datomic for immutable URL storage, Redis for high-performance caching, and Apache Kafka for real-time click event streaming and analytics aggregation. Includes JWT authentication and rate limiting logic modules, Prometheus metrics instrumentation, and a CI/CD pipeline via GitHub Actions.
 
 ---
 
@@ -89,15 +89,12 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full specification with layer a
 sequenceDiagram
     participant C as Client
     participant P as Pedestal
-    participant Auth as JWT Auth
     participant Ctrl as Controller
     participant D as Datomic
     participant R as Redis
     participant K as Kafka
 
-    C->>P: POST /api/urls (with Bearer token)
-    P->>Auth: Validate JWT
-    Auth->>P: Identity injected
+    C->>P: POST /api/urls
     P->>Ctrl: create-url!
     Ctrl->>D: save-url!
     Ctrl->>R: cache-url!
@@ -121,27 +118,24 @@ sequenceDiagram
 | Method   | Endpoint                       | Auth     | Description                    |
 |----------|--------------------------------|----------|--------------------------------|
 | `GET`    | `/health`                      | Public   | Health check                   |
-| `GET`    | `/metrics`                     | Public   | Prometheus metrics             |
-| `POST`   | `/api/auth/login`             | Public   | Authenticate and get JWT token |
-| `POST`   | `/api/urls`                   | Required | Shorten a URL                  |
+| `POST`   | `/api/urls`                   | Public   | Shorten a URL                  |
 | `GET`    | `/r/:code`                     | Public   | Redirect to original URL       |
-| `GET`    | `/api/urls/:code/stats`       | Required | Get click statistics (paginated) |
-| `GET`    | `/api/urls/:code/analytics`   | Required | Get daily analytics breakdown  |
-| `DELETE` | `/api/urls/:code`             | Required | Deactivate a short URL         |
+| `GET`    | `/api/urls/:code/stats`       | Public   | Get click statistics           |
+| `DELETE` | `/api/urls/:code`             | Public   | Deactivate a short URL         |
 
 ---
 
 ## Security
 
-- **JWT Authentication** - Protected endpoints require a `Bearer` token obtained via `/api/auth/login`.
-- **Rate Limiting** - Per-IP token bucket: 30 req/min for API, 100 req/min for redirects, 5 req/min for login (brute force protection).
-- **429 Too Many Requests** - Includes `Retry-After` header when rate limit is exceeded.
+- **JWT Authentication** - Logic module (`logic/auth.clj`) with password hashing (bcrypt+sha512), JWT token generation and validation. Not yet integrated as HTTP middleware.
+- **Rate Limiting** - Token-bucket algorithm (`logic/rate_limiter.clj`) with configurable per-IP limits per route group. Not yet integrated as HTTP middleware.
 
 ---
 
 ## Observability
 
-- **`/metrics`** endpoint exposes Prometheus-compatible metrics.
+Prometheus instrumentation module (`observability/metrics.clj`) with the following metrics defined. Not yet exposed via HTTP endpoint.
+
 - `http_requests_total` - Request count by method, path, and status.
 - `http_request_duration_seconds` - Request latency histogram.
 - `urlshortener_urls_created_total` - Business metric for URL creation.
@@ -176,5 +170,5 @@ GitHub Actions pipeline runs on every push and PR to `main`:
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Diplomat Architecture specification and layer access rules |
-| [TESTING.md](./TESTING.md) | Testing guide, patterns and statistics (56 tests, 281 assertions) |
+| [TESTING.md](./TESTING.md) | Testing guide, patterns and statistics (54 tests, 270 assertions) |
 | [SETUP.md](./SETUP.md) | Prerequisites, getting started, API usage and configuration |

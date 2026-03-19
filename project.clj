@@ -29,6 +29,12 @@
                  [buddy/buddy-sign                  "3.6.1-359"]
                  [buddy/buddy-hashers               "2.0.167"]
 
+                 ;; Observability - Prometheus
+                 [io.prometheus/prometheus-metrics-core                "1.5.0"]
+                 [io.prometheus/prometheus-metrics-model               "1.5.0"]
+                 [io.prometheus/prometheus-metrics-instrumentation-jvm "1.5.0"]
+                 [io.prometheus/prometheus-metrics-exposition-formats  "1.5.0"]
+
                  ;; Utilities
                  [org.clojure/tools.logging         "1.3.0"]
                  [ch.qos.logback/logback-classic    "1.5.16"]

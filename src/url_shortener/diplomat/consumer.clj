@@ -20,28 +20,30 @@
         instant (.toInstant (.atStartOfDay local-date ZoneOffset/UTC))]
     (Date/from instant)))
 
+(defn- next-day [^Date day-start]
+  (let [local-date (-> (.toInstant day-start) (.atZone ZoneOffset/UTC) .toLocalDate)
+        next-date (.plusDays local-date 1)
+        instant (.toInstant (.atStartOfDay next-date ZoneOffset/UTC))]
+    (Date/from instant)))
+
 (defn- process-accessed-event [datomic event]
   (try
     (let [short-code (:short-code event)
           timestamp-str (:timestamp event)
           timestamp (Date/from (Instant/parse timestamp-str))
           day-start (date->day-start timestamp)
-          ip-address (:ip-address event)
+          day-end (next-day day-start)
           existing (diplomat.datomic/find-daily-analytics datomic short-code day-start)
-          today-analytics (first (filter #(= (:analytics/date %) day-start) existing))]
-      (if today-analytics
-        (diplomat.datomic/save-daily-analytics!
-         datomic
-         {:analytics/short-code short-code
-          :analytics/date day-start
-          :analytics/clicks (inc (:analytics/clicks today-analytics 0))
-          :analytics/unique-visitors (:analytics/unique-visitors today-analytics 0)})
-        (diplomat.datomic/save-daily-analytics!
-         datomic
-         {:analytics/short-code short-code
-          :analytics/date day-start
-          :analytics/clicks 1
-          :analytics/unique-visitors (if ip-address 1 0)})))
+          today-analytics (first (filter #(= (:analytics/date %) day-start) existing))
+          unique-visitors (diplomat.datomic/count-unique-visitors datomic short-code day-start day-end)]
+      (diplomat.datomic/save-daily-analytics!
+       datomic
+       {:analytics/short-code short-code
+        :analytics/date day-start
+        :analytics/clicks (if today-analytics
+                            (inc (:analytics/clicks today-analytics 0))
+                            1)
+        :analytics/unique-visitors unique-visitors}))
     (catch Exception e
       (log/warn "Failed to process accessed event" {:error (.getMessage e)}))))
 

@@ -128,6 +128,18 @@
     (->> (map first results)
          (sort-by :analytics/date))))
 
+(defn count-unique-visitors [datomic short-code day-start day-end]
+  (let [db (d/db (:conn datomic))
+        results (d/q '[:find (count-distinct ?ip)
+                        :in $ ?sc ?start ?end
+                        :where [?e :click/short-code ?sc]
+                               [?e :click/timestamp ?ts]
+                               [?e :click/ip-address ?ip]
+                               [(<= ?start ?ts)]
+                               [(< ?ts ?end)]]
+                      db short-code day-start day-end)]
+    (or (ffirst results) 0)))
+
 (defn save-user! [datomic user]
   (let [conn (:conn datomic)
         tx-data [(assoc user :db/id (str "user-" (:user/id user)))]]

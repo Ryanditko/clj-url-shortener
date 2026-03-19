@@ -26,10 +26,16 @@
 (defn- ->cache-adapter [cache]
   (reify controllers/ICache
     (cache-url! [_ cached-url ttl] (diplomat.cache/set-url! cache cached-url ttl))
-    (get-cached-url [_ code] (diplomat.cache/get-url cache code))
+    (get-cached-url [_ code]
+      (let [result (diplomat.cache/get-url cache code)]
+        (if result (metrics/inc-cache-hit) (metrics/inc-cache-miss))
+        result))
     (invalidate-url! [_ code] (diplomat.cache/delete-url! cache code))
     (cache-stats! [_ stats ttl] (diplomat.cache/set-stats! cache stats ttl))
-    (get-cached-stats [_ code] (diplomat.cache/get-stats cache code))))
+    (get-cached-stats [_ code]
+      (let [result (diplomat.cache/get-stats cache code)]
+        (if result (metrics/inc-cache-hit) (metrics/inc-cache-miss))
+        result))))
 
 (defn- ->producer-adapter [producer]
   (reify controllers/IProducer
@@ -162,8 +168,10 @@
   (let [{:keys [json-params components]} request
         {:keys [original-url owner expires-at custom-code]} json-params
         {:keys [datomic cache producer]} components
+        authenticated-user (:authenticated-user request)
+        effective-owner (or (when authenticated-user (:sub authenticated-user)) owner)
         url (controllers/create-url! original-url
-                                     {:owner owner :expires-at expires-at :custom-code custom-code}
+                                     {:owner effective-owner :expires-at expires-at :custom-code custom-code}
                                      datomic cache producer)]
     (metrics/inc-urls-created)
     {:status 201
@@ -196,10 +204,20 @@
      :headers {"Content-Type" "application/json"}
      :body (json/write-str response)}))
 
+(defn- check-url-ownership! [raw-datomic short-code authenticated-user]
+  (let [url-entity (diplomat.datomic/find-url-by-short-code raw-datomic short-code)
+        url-owner (:url/owner url-entity)
+        requester (:sub authenticated-user)]
+    (when (and url-owner requester (not= url-owner requester))
+      (throw (ex-info "You do not own this URL"
+                      {:type :unauthorized})))))
+
 (defn deactivate-url-handler [request]
   (let [{:keys [path-params components]} request
         short-code (:code path-params)
-        {:keys [datomic cache producer]} components]
+        {:keys [datomic cache producer]} components
+        raw-datomic (:raw-datomic components)]
+    (check-url-ownership! raw-datomic short-code (:authenticated-user request))
     (controllers/deactivate-url! short-code datomic cache producer)
     {:status 204 :body ""}))
 
@@ -260,6 +278,7 @@
         short-code (:code path-params)
         raw-datomic (get-in request [:components :raw-datomic])
         url-exists? (diplomat.datomic/find-url-by-short-code raw-datomic short-code)]
+    (check-url-ownership! raw-datomic short-code (:authenticated-user request))
     (when-not url-exists?
       (throw (ex-info "Short code not found"
                       {:type :not-found :short-code short-code})))
@@ -288,19 +307,31 @@
      ["/api/urls/:code" :delete [deactivate-url-handler] :route-name ::deactivate]
      ["/r/:code" :get [redirect-url-handler] :route-name ::redirect]}))
 
+(def ^:private cors-headers
+  {"Access-Control-Allow-Credentials" "true"
+   "Access-Control-Allow-Methods" "GET, POST, PUT, DELETE, OPTIONS"
+   "Access-Control-Allow-Headers" "Authorization, Content-Type, Accept"
+   "Access-Control-Max-Age" "86400"})
+
 (defn- add-cors-headers [context]
   (let [origin (get-in context [:request :headers "origin"])]
     (if origin
       (update-in context [:response :headers] merge
-                 {"Access-Control-Allow-Origin" origin
-                  "Access-Control-Allow-Credentials" "true"
-                  "Access-Control-Allow-Methods" "GET, POST, PUT, DELETE, OPTIONS"
-                  "Access-Control-Allow-Headers" "Authorization, Content-Type, Accept"})
+                 (assoc cors-headers "Access-Control-Allow-Origin" origin))
       context)))
 
-(defn- cors-leave-interceptor []
+(defn- cors-interceptor []
   (interceptor/interceptor
-   {:name ::cors-leave
+   {:name ::cors
+    :enter (fn [context]
+             (if (= :options (get-in context [:request :request-method]))
+               (let [origin (get-in context [:request :headers "origin"])]
+                 (assoc context :response
+                        {:status 204
+                         :headers (if origin
+                                    (assoc cors-headers "Access-Control-Allow-Origin" origin)
+                                    cors-headers)}))
+               context))
     :leave add-cors-headers}))
 
 (defn base-service-map [config]
@@ -314,7 +345,7 @@
       http/default-interceptors
       (update ::http/interceptors
               #(into [(error-interceptor)
-                      (cors-leave-interceptor)
+                      (cors-interceptor)
                       (metrics-interceptor)
                       (inject-components components config)]
                      %))))
@@ -356,7 +387,7 @@
         http/default-interceptors
         (update ::http/interceptors
                 #(into [(error-interceptor)
-                        (cors-leave-interceptor)
+                        (cors-interceptor)
                         (metrics-interceptor)
                         (inject-components components-with-limiter config)]
                        %)))))

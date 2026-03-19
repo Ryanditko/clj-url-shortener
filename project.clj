@@ -25,6 +25,10 @@
                  ;; Schema validation
                  [prismatic/schema                  "1.4.1"]
 
+                 ;; Authentication
+                 [buddy/buddy-sign                  "3.6.1-359"]
+                 [buddy/buddy-hashers               "2.0.167"]
+
                  ;; Utilities
                  [org.clojure/tools.logging         "1.3.0"]
                  [ch.qos.logback/logback-classic    "1.5.16"]

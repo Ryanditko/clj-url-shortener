@@ -100,7 +100,31 @@
     :db/cardinality :db.cardinality/one
     :db/doc "Unique visitor count for the day"}])
 
-(def schema (concat url-schema click-event-schema analytics-schema))
+(def user-schema
+  [{:db/ident :user/id
+    :db/valueType :db.type/uuid
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity
+    :db/doc "Unique identifier for user"}
+
+   {:db/ident :user/username
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/value
+    :db/index true
+    :db/doc "Unique username for authentication"}
+
+   {:db/ident :user/password-hash
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/doc "Bcrypt+SHA512 hashed password"}
+
+   {:db/ident :user/created-at
+    :db/valueType :db.type/instant
+    :db/cardinality :db.cardinality/one
+    :db/doc "Timestamp when user was created"}])
+
+(def schema (concat url-schema click-event-schema analytics-schema user-schema))
 
 (defn migrate! [conn]
   @(d/transact conn schema))

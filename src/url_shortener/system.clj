@@ -3,6 +3,7 @@
             [url-shortener.diplomat.datomic :as diplomat.datomic]
             [url-shortener.diplomat.cache :as diplomat.cache]
             [url-shortener.diplomat.producer :as diplomat.producer]
+            [url-shortener.diplomat.consumer :as diplomat.consumer]
             [url-shortener.diplomat.http-server :as diplomat.http-server]))
 
 (defn create-system [config]
@@ -10,6 +11,9 @@
    :datomic (diplomat.datomic/new-datomic config)
    :cache (diplomat.cache/new-cache config)
    :producer (diplomat.producer/new-producer config)
+   :consumer (component/using
+              (diplomat.consumer/new-consumer config)
+              [:datomic])
    :http-server (component/using
                  (diplomat.http-server/new-http-server config)
                  [:datomic :cache :producer])))

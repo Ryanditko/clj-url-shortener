@@ -24,7 +24,7 @@ lein deps
 ### 3. Start infrastructure services
 
 ```bash
-docker-compose up -d
+docker-compose up -d redis kafka
 ```
 
 This starts Redis (port 6379) and Kafka in KRaft mode (port 9092).
@@ -37,7 +37,47 @@ lein run
 
 The API starts on `http://localhost:8080`.
 
+### 5. Run the full stack with Docker
+
+```bash
+docker-compose up -d
+```
+
+This builds and starts the app along with Redis and Kafka.
+
 ## API Usage
+
+### Register a user
+
+```bash
+curl -X POST http://localhost:8080/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username": "myuser", "password": "mypassword123"}'
+```
+
+**Response** (201):
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "myuser"
+}
+```
+
+### Login
+
+```bash
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "myuser", "password": "mypassword123"}'
+```
+
+**Response** (200):
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9...",
+  "expires-in": 3600
+}
+```
 
 ### Create a short URL
 
@@ -84,10 +124,35 @@ curl http://localhost:8080/api/urls/A1b2C3d4/stats
 }
 ```
 
-### Deactivate a URL
+### Get daily analytics (requires auth)
 
 ```bash
-curl -X DELETE http://localhost:8080/api/urls/A1b2C3d4
+curl http://localhost:8080/api/urls/A1b2C3d4/analytics \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9..."
+```
+
+**Response** (200):
+```json
+{
+  "short-code": "A1b2C3d4",
+  "daily-analytics": [
+    {"date": "2026-03-17T00:00:00Z", "clicks": 25, "unique-visitors": 10},
+    {"date": "2026-03-18T00:00:00Z", "clicks": 17, "unique-visitors": 5}
+  ]
+}
+```
+
+### Deactivate a URL (requires auth)
+
+```bash
+curl -X DELETE http://localhost:8080/api/urls/A1b2C3d4 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9..."
+```
+
+### Prometheus metrics
+
+```bash
+curl http://localhost:8080/metrics
 ```
 
 ## Configuration
@@ -102,6 +167,9 @@ Application configuration lives in `resources/config.edn` and supports environme
 | `:kafka-bootstrap-servers` | Kafka broker address | `localhost:9092` |
 | `:port` | HTTP server port | `8080` |
 | `:base-url` | Base URL for generated short links | `http://localhost:8080/r` |
+| `:jwt-secret` | Secret key for JWT signing | `dev-secret-change-in-production` |
+| `:jwt-ttl-minutes` | JWT token time-to-live in minutes | `60` |
+| `:rate-limiter` | Rate limit config per route group | See `config.edn` |
 
 ## Running Tests
 

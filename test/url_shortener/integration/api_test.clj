@@ -1,14 +1,16 @@
 (ns url-shortener.integration.api-test
-  (:require [clojure.test :refer :all]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [io.pedestal.http :as http]
             [io.pedestal.test :as test]
             [clojure.data.json :as json]
             [datomic.api :as d]
             [url-shortener.diplomat.datomic :as diplomat.datomic]
             [url-shortener.diplomat.datomic.schema :as schema]
-            [url-shortener.diplomat.http-server :as diplomat.http-server]))
+            [url-shortener.diplomat.http-server :as diplomat.http-server]
+            [url-shortener.logic.auth :as auth]))
 
 (def test-uri "datomic:mem://url-shortener-api-test")
+(def test-jwt-secret "test-secret-for-integration-tests-min-32-chars!")
 
 (def test-system (atom nil))
 (def service-fn (atom nil))
@@ -25,7 +27,10 @@
           cache (->NoOpCache)
           producer (->NoOpProducer)
           components {:datomic datomic :cache cache :producer producer}
-          service-map (diplomat.http-server/build-service-map components {:port 0})
+          config {:port 0
+                  :jwt-secret test-jwt-secret
+                  :jwt-ttl-minutes 60}
+          service-map (diplomat.http-server/build-service-map components config)
           servlet (http/create-servlet service-map)]
       (reset! test-system {:datomic datomic :conn conn})
       (reset! service-fn (::http/service-fn servlet)))))
@@ -48,6 +53,46 @@
       (when (= 200 (:status response))
         (let [body (json/read-str (:body response) :key-fn keyword)]
           (is (= "ok" (:status body))))))))
+
+(deftest metrics-endpoint-test
+  (testing "metrics endpoint returns prometheus text format"
+    (let [response (test/response-for @service-fn :get "/metrics")]
+      (is (= 200 (:status response)))
+      (is (string? (:body response))))))
+
+(deftest register-and-login-test
+  (testing "register a user and then login"
+    (let [reg-body (json/write-str {:username "apiuser" :password "testpassword123"})
+          reg-resp (test/response-for
+                    @service-fn
+                    :post "/api/auth/register"
+                    :headers {"Content-Type" "application/json"}
+                    :body reg-body)]
+      (is (= 201 (:status reg-resp)))
+      (when (= 201 (:status reg-resp))
+        (let [login-body (json/write-str {:username "apiuser" :password "testpassword123"})
+              login-resp (test/response-for
+                          @service-fn
+                          :post "/api/auth/login"
+                          :headers {"Content-Type" "application/json"}
+                          :body login-body)]
+          (is (= 200 (:status login-resp)))
+          (when (= 200 (:status login-resp))
+            (let [body (json/read-str (:body login-resp) :key-fn keyword)]
+              (is (string? (:token body)))
+              (is (pos? (:expires-in body)))
+              (let [{:keys [valid? claims]} (auth/validate-token (:token body) test-jwt-secret)]
+                (is (true? valid?))
+                (is (= "apiuser" (:sub claims))))))))))
+
+  (testing "login rejects empty credentials"
+    (let [request-body (json/write-str {:username "" :password ""})
+          response (test/response-for
+                    @service-fn
+                    :post "/api/auth/login"
+                    :headers {"Content-Type" "application/json"}
+                    :body request-body)]
+      (is (= 400 (:status response))))))
 
 (deftest create-url-integration-test
   (testing "creates a new shortened URL"
@@ -179,6 +224,32 @@
                                     :get (str "/r/" short-code))]
             (is (= 410 (:status redirect-response)))))))))
 
+(deftest analytics-endpoint-test
+  (testing "returns analytics for a URL"
+    (let [create-body (json/write-str {:original-url "https://example.com/analytics-test"})
+          create-response (test/response-for
+                           @service-fn
+                           :post "/api/urls"
+                           :headers {"Content-Type" "application/json"}
+                           :body create-body)]
+      (when (= 201 (:status create-response))
+        (let [created-url (json/read-str (:body create-response) :key-fn keyword)
+              short-code (:short-code created-url)
+              analytics-response (test/response-for
+                                  @service-fn
+                                  :get (str "/api/urls/" short-code "/analytics"))]
+          (is (= 200 (:status analytics-response)))
+          (when (= 200 (:status analytics-response))
+            (let [body (json/read-str (:body analytics-response) :key-fn keyword)]
+              (is (= short-code (:short-code body)))
+              (is (vector? (:daily-analytics body)))))))))
+
+  (testing "returns 404 for non-existent code"
+    (let [response (test/response-for
+                    @service-fn
+                    :get "/api/urls/nonexistent/analytics")]
+      (is (= 404 (:status response))))))
+
 (deftest end-to-end-flow-test
   (testing "complete URL lifecycle"
     (let [create-body (json/write-str {:original-url "https://example.com/e2e-test"
@@ -201,6 +272,11 @@
                 stats (json/read-str (:body stats-resp) :key-fn keyword)]
             (is (= 200 (:status stats-resp)))
             (is (>= (:total-clicks stats) 1)))
+
+          (let [analytics-resp (test/response-for @service-fn :get (str "/api/urls/" code "/analytics"))
+                analytics (json/read-str (:body analytics-resp) :key-fn keyword)]
+            (is (= 200 (:status analytics-resp)))
+            (is (= code (:short-code analytics))))
           
           (let [deactivate-resp (test/response-for @service-fn :delete (str "/api/urls/" code))]
             (is (= 204 (:status deactivate-resp))))

@@ -17,6 +17,19 @@
 - Click counting
 - Statistics calculation
 
+**Auth Tests** (`logic/auth_test.clj`)
+- Password hashing and verification (bcrypt+sha512)
+- JWT token generation and validation
+- Expired token rejection
+- Bearer token extraction from headers
+
+**Rate Limiter Tests** (`logic/rate_limiter_test.clj`)
+- Limiter creation with configurable limits
+- Requests allowed within limit
+- Requests blocked when exceeding limit
+- Separate limits per IP and per route group
+- Token refill over time
+
 **Adapter Tests** (`adapters/url_test.clj`)
 - Wire request to model transformations
 - Model to wire response transformations
@@ -105,12 +118,16 @@ View report at `target/coverage/index.html`.
 
 | Category | Tests | Assertions |
 |----------|-------|------------|
-| Logic | 13 | 65 |
-| Adapters | 10 | 49 |
-| Controllers | 3 | 17 |
-| Datomic | 7 | 19 |
+| Logic (shortener) | 13 | 71 |
+| Logic (auth) | 4 | 14 |
+| Logic (rate-limiter) | 3 | 14 |
+| Adapters | 12 | 64 |
+| Controllers | 6 | 29 |
+| Diplomat (cache) | 2 | 12 |
+| Diplomat (producer) | 3 | 9 |
+| Diplomat (datomic) | 7 | 19 |
 | Integration | 6 | 32 |
-| **Total** | **39** | **182** |
+| **Total** | **54** | **270** |
 
 ## Test Patterns
 
